@@ -75,7 +75,7 @@ async function showAlbum() {
   $('#development-checklist').hidden=!parent;
   $('.child-summary').hidden=!parent;
   for (const name of ['add-button','invite-button','first-moment']) $(`#${name}`).hidden = !parent;
-  $('#album-description').textContent = parent ? 'המקומות, הפעמים הראשונות, וכל מה שביניהם.' : 'כאן רואים את התמונות והסיפורים. אפשר לגלול למטה ולכתוב תגובה מתחת לכל אירוע.';
+  $('#album-description').textContent = parent ? 'התמונות, הסיפורים והתגובות — מסודרים לפי אירועים.' : 'גללו בין האירועים. בכל אירוע אפשר לראות תמונות ולכתוב תגובה.';
   $('#moments').replaceChildren(); $('#empty').hidden = true; $('#count').textContent = 'טוענים רגעים…';
   $('#checklist-items').replaceChildren();$('#checklist-count').textContent='';$('#checklist-error').textContent='';$('#checklist-status').textContent='';
   $('#photo-review').hidden=true;$('#photo-status').textContent='';
@@ -91,16 +91,19 @@ async function showAlbum() {
   let month='';
   $('#count').textContent = moments.length === 1 ? 'רגע אחד באלבום' : `${moments.length} רגעים באלבום`;
   $('#empty').hidden = !!moments.length;
-  moments.forEach(moment => {
+  moments.forEach((moment,index) => {
     const key=moment.date.slice(0,7);
     if(key!==month) {const heading=document.createElement('h3');heading.className='timeline-month';heading.textContent=new Date(moment.date+'T12:00:00').toLocaleDateString('he-IL',{month:'long',year:'numeric'});$('#moments').append(heading);month=key;}
-    const card = document.createElement('article'); card.className = 'card';card.id='moment-'+moment.id;
+    const card = document.createElement('article'); card.className = 'card';card.id='moment-'+moment.id;card.tabIndex=-1;card.setAttribute('aria-labelledby','title-'+moment.id);
     const content = document.createElement('div'); content.className = 'card-content';
     const date = document.createElement('time'); date.dateTime = moment.date;
     date.textContent = new Date(moment.date + 'T12:00:00').toLocaleDateString('he-IL',{day:'numeric',month:'long',year:'numeric'});
-    const title = document.createElement('h2'); title.textContent = moment.title;
+    const title = document.createElement('h2'); title.textContent = moment.title;title.id='title-'+moment.id;
     const description = document.createElement('p'); description.textContent = moment.description;
-    const heading=document.createElement('div');heading.className='event-heading';heading.append(date,title);content.append(heading);
+    const heading=document.createElement('div');heading.className='event-heading';
+    const meta=document.createElement('div');meta.className='event-meta';
+    const number=document.createElement('span');number.className='event-number';number.textContent=`אירוע ${index+1} מתוך ${moments.length}`;
+    meta.append(number,date);heading.append(meta,title);
     if (parent) {
       const edit=document.createElement('button');edit.type='button';edit.className='edit-event';
       edit.setAttribute('aria-label',`עריכת האירוע: ${moment.title}`);edit.title='עריכת אירוע';
@@ -122,7 +125,11 @@ async function showAlbum() {
     });
     content.append(commentSection(moment));
     if(!parent)content.append(photos.requestControl(moment,requests,photoContext));
-    card.append(content);const item=document.createElement('div');item.className='timeline-item';item.append(card);$('#moments').append(item);
+    const end=document.createElement('div');end.className='event-end';
+    const endLabel=document.createElement('span');endLabel.textContent='סוף האירוע';end.append(endLabel);
+    if(index<moments.length-1){const next=document.createElement('a');next.className='next-event';next.href='#moment-'+moments[index+1].id;next.textContent='לאירוע הבא: '+moments[index+1].title+' ↓';end.append(next);}
+    else {const last=document.createElement('span');last.textContent='זה האירוע האחרון באלבום';end.append(last);}
+    card.append(heading,content,end);const item=document.createElement('div');item.className='timeline-item';item.append(card);$('#moments').append(item);
   });
 }
 function mediaGallery(moment,enlarged=false,start=0) {
@@ -135,7 +142,7 @@ function mediaGallery(moment,enlarged=false,start=0) {
   const previous=document.createElement('button');previous.type='button';previous.className='secondary';previous.textContent='הקודם';previous.setAttribute('aria-label','לתמונה או לסרטון הקודמים');
   const next=document.createElement('button');next.type='button';next.className='secondary';next.textContent='הבא';next.setAttribute('aria-label','לתמונה או לסרטון הבאים');
   const position=document.createElement('span');position.setAttribute('role','status');
-  controls.append(previous,position,next);previous.hidden=next.hidden=files.length===1;
+  controls.append(previous,position,next);controls.hidden=files.length===1;
   const open=document.createElement('button');open.type='button';open.className='secondary enlarge-media';open.hidden=enlarged;
   const download=document.createElement('a');download.className='file-link gallery-download';
   open.onclick=()=>{
@@ -154,11 +161,12 @@ function mediaGallery(moment,enlarged=false,start=0) {
     position.textContent=`${isVideo?'סרטון':'תמונה'} ${index+1} מתוך ${files.length}`;
     previous.disabled=index===0;next.disabled=index===files.length-1;
     open.textContent=isVideo?'צפייה בסרטון בחלון גדול':'הגדלת התמונה';
-    download.href=media.src;download.download=file.name;download.textContent=isVideo?'שמירת הסרטון למכשיר':'שמירת התמונה למכשיר';
+    download.href=media.src;download.download=file.name;download.textContent=isVideo?'שמירת הסרטון':'שמירת התמונה';
   }
   previous.onclick=()=>{if(index>0){index--;render();}};
   next.onclick=()=>{if(index<files.length-1){index++;render();}};
-  gallery.append(screen,controls,open,download);render();return gallery;
+  const actions=document.createElement('div');actions.className='gallery-actions';actions.append(open,download);
+  gallery.append(screen,controls,actions);render();return gallery;
 }
 $('#media-dialog').addEventListener('close',()=>{$('#media-content').querySelectorAll('video').forEach(video=>video.pause());$('#media-content').replaceChildren();});
 let deletingMoment=null,deletePending=false;
@@ -243,10 +251,9 @@ function commentSection(moment) {
   const section = document.createElement('section'); section.className = 'comments';
   const summary = document.createElement('h3');
   let count = moment.comments.length;
-  const updateCount = () => { summary.textContent = count ? `תגובות לאירוע (${count})` : 'תגובה לאירוע הזה'; };
+  const updateCount = () => { summary.textContent = `תגובות לאירוע (${count})`;summary.hidden=count===0; };
   updateCount();
   const list = document.createElement('div'); list.className = 'comment-list';
-  const empty = document.createElement('p'); empty.className = 'comment-empty'; empty.textContent = 'עוד אין תגובות. אפשר להשאיר כאן כמה מילים חמות.'; empty.hidden = count > 0;
   function appendComment(comment) {
     const item = document.createElement('article'); item.className = 'comment';
     const author = document.createElement('strong'); author.textContent = comment.author;
@@ -268,10 +275,10 @@ function commentSection(moment) {
     input.disabled = true;
     busy(form,error,async()=>{
       const comment = await api('/api/comments',{moment:moment.id,body:input.value});
-      appendComment(comment); count++; updateCount(); empty.hidden = true; input.value = ''; status.textContent = 'התגובה פורסמה והמשפחה יכולה לראות אותה.';
+      appendComment(comment); count++; updateCount(); input.value = ''; status.textContent = 'התגובה פורסמה והמשפחה יכולה לראות אותה.';
     }).finally(()=>{ input.disabled = false; });
   };
-  section.append(summary,empty,list,form); return section;
+  section.append(summary,list,form); return section;
 }
 $('#album-picker').onchange = async event => { current = albums.find(a => a.id === event.target.value); try { await showAlbum(); } catch(e) { $('#page-error').textContent = e.message; } };
 $('#logout').onclick = async () => { try { await api('/api/logout',{}); current = null; await load(); } catch(e) { $('#page-error').textContent = e.message; } };
