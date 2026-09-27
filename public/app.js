@@ -92,6 +92,12 @@ async function showAlbum() {
       svg.setAttribute('viewBox','0 0 24 24');svg.setAttribute('aria-hidden','true');svg.setAttribute('fill','none');svg.setAttribute('stroke','currentColor');svg.setAttribute('stroke-width','1.7');svg.setAttribute('stroke-linecap','round');svg.setAttribute('stroke-linejoin','round');
       const path=document.createElementNS('http://www.w3.org/2000/svg','path');path.setAttribute('d','m16 4 4 4M4 20l4-1L20 7a2.83 2.83 0 0 0-4-4L4 15l-1 6 5-2');svg.append(path);edit.append(svg);
       edit.onclick=()=>openMoment(moment);card.append(edit);card.classList.add('editable');
+      const remove=document.createElement('button');remove.type='button';remove.className='edit-event delete-event';
+      remove.setAttribute('aria-label',`מחיקת האירוע: ${moment.title}`);remove.title='מחיקת אירוע';
+      const trash=svg.cloneNode(false),trashPath=path.cloneNode(false);
+      trashPath.setAttribute('d','M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7M14 10v7');trash.append(trashPath);remove.append(trash);
+      remove.onclick=()=>openDelete(moment,moments,album);
+      card.append(remove);
     }
     const details = document.createElement('details');
     const summary = document.createElement('summary'); summary.textContent = 'הסיפור והקבצים';
@@ -108,6 +114,41 @@ async function showAlbum() {
     card.append(content);const item=document.createElement('div');item.className='timeline-item';item.append(card);$('#moments').append(item);
   });
 }
+let deletingMoment=null,deletePending=false;
+function openDelete(moment,moments,album) {
+  deletingMoment={moment,album};
+  const targets=moments.filter(m=>m.id!==moment.id),hasFiles=moment.files.length>0;
+  $('#delete-description').textContent=`למחוק את האירוע „${moment.title}”? הסיפור והתגובות יימחקו לצמיתות.`;
+  $('#delete-choice-label').hidden=!hasFiles;
+  $('#delete-choice').disabled=!hasFiles;
+  $('#delete-choice').value=hasFiles?'':'delete';
+  $('#delete-choice option[value=transfer]').disabled=!targets.length;
+  $('#delete-target').replaceChildren(new Option('בחרו אירוע',''),...targets.map(m=>new Option(`${m.title} · ${m.date} (${m.files.length} קבצים)`,m.id)));
+  $('#delete-error').textContent='';
+  $('#delete-note').textContent=hasFiles&&!targets.length?'אין אירוע אחר באלבום. כדי לשמור את הקבצים, בטלו וצרו אירוע נוסף.':'';
+  updateDeleteChoice();$('#delete-dialog').showModal();
+}
+function updateDeleteChoice() {
+  const transfer=$('#delete-choice').value==='transfer';
+  $('#delete-target-label').hidden=!transfer;$('#delete-target').required=transfer;$('#delete-target').disabled=!transfer;
+  $('#delete-submit').textContent=transfer?'העברת הקבצים ומחיקת האירוע':deletingMoment?.moment.files.length?'מחיקת האירוע והקבצים':'מחיקת האירוע';
+}
+$('#delete-choice').onchange=updateDeleteChoice;
+$('#delete-cancel').onclick=()=>$('#delete-dialog').close();
+$('#delete-dialog').addEventListener('cancel',event=>{if(deletePending)event.preventDefault();});
+$('#delete-form').onsubmit=async event=>{
+  event.preventDefault();if(deletePending||!deletingMoment)return;
+  const {moment,album}=deletingMoment;
+  const data={album,id:moment.id};
+  if($('#delete-choice').value==='transfer')data.targetId=$('#delete-target').value;
+  const controls=[...event.target.querySelectorAll('button,select')],states=controls.map(c=>c.disabled);
+  deletePending=true;controls.forEach(c=>c.disabled=true);$('#delete-error').textContent='';
+  try {
+    await api('/api/moments/delete',data);$('#delete-dialog').close();
+    if(current?.id===album) {try {await showAlbum();} catch(e) {$('#page-error').textContent=e.message;}}
+  } catch(e) {$('#delete-error').textContent=e.message;}
+  finally {deletePending=false;controls.forEach((c,i)=>c.disabled=states[i]);}
+};
 function renderChecklist(items,album,parent) {
   if(current?.id!==album)return;
   const completedCount=items.filter(i=>i.completed).length;

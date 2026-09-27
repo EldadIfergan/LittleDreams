@@ -118,6 +118,33 @@ export default async function handler(req,res) {
       const signed=await storage.createSignedUploadUrl(file);if(signed.error) throw signed.error;
       return await finish(201,{id:file,url:signed.data.signedUrl});
     }
+    if(path==='/api/moments/delete'&&write) {
+      await member(user,b.album,true);
+      const moment=text(b.id,80);
+      const target=b.targetId===undefined?null:text(b.targetId,80);
+      if(target===moment)fail(400,'יש לבחור אירוע אחר');
+      // Lock both events in stable order to serialize transfers and concurrent edits.
+      if(target)await query('SELECT id FROM moments WHERE id IN ($1,$2) ORDER BY id FOR UPDATE',[moment,target]);
+      const existing=await one('SELECT id FROM moments WHERE id=$1 AND album_id=$2 FOR UPDATE',[moment,b.album]);
+      if(!existing) fail(404,'האירוע לא נמצא באלבום');
+      const files=await query('SELECT id FROM files WHERE moment_id=$1',[moment]);
+      if(target) {
+        if(!await one('SELECT id FROM moments WHERE id=$1 AND album_id=$2 FOR UPDATE',[target,b.album]))fail(404,'אירוע היעד לא נמצא באלבום');
+        const combined=[...files,...await query('SELECT id FROM files WHERE moment_id=$1',[target])];
+        if(combined.length>10)fail(400,'ההעברה תחרוג ממגבלת 10 קבצים באירוע. בחרו אירוע אחר');
+        const sizes=await Promise.all(combined.map(async f=>{const info=await storage.info(f.id);if(info.error)throw info.error;return Number(info.data.size);}));
+        const total=sizes.reduce((sum,size)=>sum+size,0);
+        if(!Number.isFinite(total)||total>104857600)fail(400,'ההעברה תחרוג ממגבלת 100MB באירוע. בחרו אירוע אחר');
+      }
+      await query('UPDATE checklist SET moment_id=NULL WHERE moment_id=$1',[moment]);
+      await query('DELETE FROM comments WHERE moment_id=$1',[moment]);
+      if(target)await query('UPDATE files SET moment_id=$1 WHERE moment_id=$2',[target,moment]);
+      else await query('DELETE FROM files WHERE moment_id=$1',[moment]);
+      await query('DELETE FROM moments WHERE id=$1 AND album_id=$2',[moment,b.album]);
+      await client.query('COMMIT');
+      if(!target&&files.length) {try {const cleanup=await storage.remove(files.map(f=>f.id));if(cleanup.error)console.error('Deleted event file cleanup failed');} catch {console.error('Deleted event file cleanup failed');}}
+      return send(200,{ok:true});
+    }
     if(path==='/api/moments'&&write) {
       await member(user,b.album,true);const title=text(b.title,120);
       if(typeof b.date!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(b.date)||!Number.isFinite(Date.parse(b.date))||new Date(b.date).toISOString().slice(0,10)!==b.date) fail(400,'תאריך האירוע אינו תקין');

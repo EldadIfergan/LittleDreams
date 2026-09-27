@@ -10,13 +10,14 @@ process.env.NODE_ENV = 'production';
 
 // A database double isolates HTTP authorization. Real SQL/storage tests remain
 // part of deployment verification and are not covered by this suite.
-let signedIn = true, role = 'viewer', statements = [];
+let signedIn = true, role = 'viewer', statements = [], momentExists = true;
 pg.Pool.prototype.connect = async () => ({
   async query(sql) {
     statements.push(sql);
     if (sql.startsWith('SELECT user_id FROM sessions')) return {rows:signedIn ? [{user_id:'user'}] : []};
     if (sql.startsWith('SELECT role FROM members')) return {rows:role ? [{role}] : []};
     if (sql.startsWith('SELECT album_id FROM moments')) return {rows:[{album_id:'album'}]};
+    if (sql.startsWith('SELECT id FROM moments')) return {rows:momentExists ? [{id:'moment'}] : []};
     if (sql.startsWith('SELECT name FROM users')) return {rows:[{name:'Family'}]};
     return {rows:[]};
   }, release() {}
@@ -39,9 +40,10 @@ test('foreign origins cannot write', async () => {
 });
 test('viewers cannot upload or create moments', async () => {
   role='viewer';
-  for(const path of ['/api/uploads','/api/moments']) {
+  for(const path of ['/api/uploads','/api/moments','/api/moments/delete']) {
     assert.equal((await request(path,{album:'album'})).status,403);
     assert.ok(!statements.some(s=>s.startsWith('INSERT')));
+    assert.ok(!statements.some(s=>s.startsWith('DELETE')));
   }
 });
 test('album members can add comments', async () => {
@@ -56,4 +58,29 @@ test('outsiders cannot read moments or add comments', async () => {
   assert.equal((await request('/api/moments?album=album')).status,403);
   assert.equal((await request('/api/comments',{moment:'moment',body:'hello'})).status,403);
   assert.ok(!statements.some(s=>s.startsWith('INSERT')));
+});
+test('parent deletion commits related record removal; missing events cause no deletion', async () => {
+  role='parent';momentExists=true;
+  assert.equal((await request('/api/moments/delete',{album:'album',id:'moment'})).status,200);
+  assert.ok(statements.includes('UPDATE checklist SET moment_id=NULL WHERE moment_id=$1'));
+  assert.deepEqual(statements.filter(s=>s.startsWith('DELETE')), [
+    'DELETE FROM comments WHERE moment_id=$1',
+    'DELETE FROM files WHERE moment_id=$1',
+    'DELETE FROM moments WHERE id=$1 AND album_id=$2'
+  ]);
+  assert.equal(statements.at(-1),'COMMIT');
+  momentExists=false;
+  assert.equal((await request('/api/moments/delete',{album:'album',id:'missing'})).status,404);
+  assert.ok(!statements.some(s=>s.startsWith('DELETE')));
+  assert.equal(statements.at(-1),'ROLLBACK');
+  momentExists=true;
+});
+test('cloud transfer reassigns files without deleting them and rejects the source as target', async () => {
+  role='parent';momentExists=true;
+  assert.equal((await request('/api/moments/delete',{album:'album',id:'moment',targetId:'target'})).status,200);
+  assert.ok(statements.includes('UPDATE files SET moment_id=$1 WHERE moment_id=$2'));
+  assert.ok(!statements.some(s=>s.startsWith('DELETE FROM files')));
+  assert.equal(statements.at(-1),'COMMIT');
+  assert.equal((await request('/api/moments/delete',{album:'album',id:'moment',targetId:'moment'})).status,400);
+  assert.ok(!statements.some(s=>s.startsWith('DELETE')));
 });

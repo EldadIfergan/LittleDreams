@@ -200,6 +200,31 @@ const server = http.createServer(async (req,res) => {
       }
       return send(res,200,moments);
     }
+    if (path === '/api/moments/delete' && req.method === 'POST') {
+      const b=await body(req);editor(user,b.album);
+      const moment=text(b.id,80,'מזהה האירוע');
+      if(!db.prepare('SELECT id FROM moments WHERE id=? AND album_id=?').get(moment,b.album)) fail(404,'האירוע לא נמצא באלבום');
+      const files=db.prepare('SELECT id FROM files WHERE moment_id=?').all(moment);
+      const target=b.targetId===undefined?null:text(b.targetId,80,'אירוע היעד');
+      if(target) {
+        if(target===moment)fail(400,'יש לבחור אירוע אחר');
+        if(!db.prepare('SELECT id FROM moments WHERE id=? AND album_id=?').get(target,b.album))fail(404,'אירוע היעד לא נמצא באלבום');
+        const combined=[...files,...db.prepare('SELECT id FROM files WHERE moment_id=?').all(target)];
+        if(combined.length>10)fail(400,'ההעברה תחרוג ממגבלת 10 קבצים באירוע. בחרו אירוע אחר');
+        if(combined.reduce((sum,f)=>sum+statSync(join(data,'uploads',f.id)).size,0)>100*1024*1024)fail(400,'ההעברה תחרוג ממגבלת 100MB באירוע. בחרו אירוע אחר');
+      }
+      db.exec('BEGIN');
+      try {
+        db.prepare('UPDATE checklist SET moment_id=NULL WHERE moment_id=?').run(moment);
+        db.prepare('DELETE FROM comments WHERE moment_id=?').run(moment);
+        if(target)db.prepare('UPDATE files SET moment_id=? WHERE moment_id=?').run(target,moment);
+        else db.prepare('DELETE FROM files WHERE moment_id=?').run(moment);
+        db.prepare('DELETE FROM moments WHERE id=? AND album_id=?').run(moment,b.album);
+        db.exec('COMMIT');
+      } catch(e) {db.exec('ROLLBACK');throw e;}
+      if(!target)for(const f of files) {try {unlinkSync(join(data,'uploads',f.id));} catch(e) {if(e.code!=='ENOENT')console.error('Deleted event file cleanup failed');}}
+      return send(res,200,{ok:true});
+    }
     if (path === '/api/moments' && req.method === 'POST') {
       const b = await body(req); editor(user,b.album);
       const title = text(b.title,120,'שם הרגע');
@@ -244,7 +269,7 @@ const server = http.createServer(async (req,res) => {
     fail(404,'העמוד לא נמצא');
   } catch (e) { if (!e.status) console.error(e); send(res,e.status || 500,{error:e.status ? e.message : 'משהו השתבש. נסו שוב.'}); }
 });
-server.listen(Number(process.env.PORT || 3000),process.env.HOST || '127.0.0.1',() => console.log(`LittleDreams: port ${process.env.PORT || 3000}`));
+server.listen(Number(process.env.PORT || 3000),process.env.HOST || '127.0.0.1',() => console.log(`LittleDreams: port ${server.address().port}`));
 if (process.env.BACKUP_ENABLED === '1') {
   backupDatabase();
   setInterval(backupDatabase,24*60*60*1000).unref();
