@@ -1,4 +1,5 @@
 import pg from 'pg';
+import { readFileSync } from 'node:fs';
 import { createClient } from '@supabase/supabase-js';
 import { randomBytes, createHash, scryptSync, timingSafeEqual } from 'node:crypto';
 
@@ -21,7 +22,7 @@ export default async function handler(req,res) {
   let client;
   try {
     if(!process.env.DATABASE_URL || !process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) fail(503,'החיבור לאחסון עדיין לא הושלם');
-    pool ||= new pg.Pool({connectionString:process.env.DATABASE_URL,ssl:{rejectUnauthorized:true},max:3,connectionTimeoutMillis:10000,idleTimeoutMillis:10000});
+    pool ||= new pg.Pool({connectionString:process.env.DATABASE_URL,ssl:{rejectUnauthorized:true,ca:readFileSync(new URL('../supabase/prod-ca-2021.crt',import.meta.url),'utf8')},max:3,connectionTimeoutMillis:10000,idleTimeoutMillis:10000});
     storage ||= createClient(process.env.SUPABASE_URL,process.env.SUPABASE_SERVICE_ROLE_KEY,{auth:{persistSession:false,autoRefreshToken:false}}).storage.from('little-dreams');
     const url=new URL(req.url,'https://localhost'); const path=url.pathname;
     const write=req.method==='POST';
