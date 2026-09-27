@@ -77,7 +77,14 @@ async function showAlbum() {
     const title = document.createElement('h2'); title.textContent = moment.title;
     const description = document.createElement('p'); description.textContent = moment.description;
     content.append(date,title);
-    if (parent) { const edit=document.createElement('button'); edit.type='button';edit.className='quiet';edit.textContent='עריכת אירוע';edit.onclick=()=>openMoment(moment);content.append(edit); }
+    if (parent) {
+      const edit=document.createElement('button');edit.type='button';edit.className='edit-event';
+      edit.setAttribute('aria-label',`עריכת האירוע: ${moment.title}`);edit.title='עריכת אירוע';
+      const svg=document.createElementNS('http://www.w3.org/2000/svg','svg');
+      svg.setAttribute('viewBox','0 0 24 24');svg.setAttribute('aria-hidden','true');svg.setAttribute('fill','none');svg.setAttribute('stroke','currentColor');svg.setAttribute('stroke-width','1.7');svg.setAttribute('stroke-linecap','round');svg.setAttribute('stroke-linejoin','round');
+      const path=document.createElementNS('http://www.w3.org/2000/svg','path');path.setAttribute('d','m16 4 4 4M4 20l4-1L20 7a2.83 2.83 0 0 0-4-4L4 15l-1 6 5-2');svg.append(path);edit.append(svg);
+      edit.onclick=()=>openMoment(moment);card.append(edit);card.classList.add('editable');
+    }
     const details = document.createElement('details');
     const summary = document.createElement('summary'); summary.textContent = 'הסיפור והקבצים';
     details.append(summary,description);
