@@ -36,3 +36,12 @@ fieldset{border:0;padding:0;margin:24px 0}legend{font-size:16px;margin-bottom:14
 .checklist-row button{font-size:.8rem;min-height:44px;padding:6px 8px;white-space:nowrap}
 .milestone-actions{display:flex;gap:12px;flex-wrap:wrap}
 @media(max-width:600px){#checklist-items{grid-template-columns:1fr}.development-checklist{padding:18px}.moments{padding-inline-start:18px}.timeline-item:before{inset-inline-start:-24px}.timeline-month{margin-top:24px}}
+
+#checklist-items{display:block}
+.checklist-group{border-top:1px solid var(--line);padding:14px 0}
+.checklist-group>summary{cursor:pointer;min-height:44px;padding:10px 0;font-weight:bold;color:var(--green)}
+.checklist-group>summary span{font-size:.8rem;font-weight:normal;color:var(--muted);margin-inline-start:12px}
+.checklist-group>p{font-size:.85rem;margin:0 0 10px}
+.checklist-group-items{display:grid;grid-template-columns:1fr 1fr;gap:0 24px}
+.checklist-row label{font-weight:normal}
+@media(max-width:600px){.checklist-group-items{grid-template-columns:1fr}}

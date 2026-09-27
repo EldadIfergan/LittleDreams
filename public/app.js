@@ -110,8 +110,22 @@ async function showAlbum() {
 }
 function renderChecklist(items,album,parent) {
   if(current?.id!==album)return;
-  $('#checklist-count').textContent=items.filter(i=>i.completed).length+' מתוך '+items.length;
-  const list=$('#checklist-items');list.replaceChildren();
+  $('#checklist-count').textContent=items.filter(i=>i.completed).length+' רגעים שסומנו';
+  const list=$('#checklist-items');
+  const opened=new Set([...list.querySelectorAll('details[open]')].map(el=>el.dataset.group));
+  const firstRender=list.children.length===0;
+  list.replaceChildren();
+  const groups=new Map();
+  for(const item of items) {
+    if(groups.has(item.group))continue;
+    const section=document.createElement('details');section.className='checklist-group';section.dataset.group=item.group;
+    section.open=opened.has(item.group)||(firstRender&&item.group==='arrival');
+    const summary=document.createElement('summary');summary.textContent=item.groupTitle;
+    const count=document.createElement('span');count.textContent=items.filter(i=>i.group===item.group&&i.completed).length+' סומנו';summary.append(count);
+    const description=document.createElement('p');description.textContent=item.groupDescription;
+    const rows=document.createElement('div');rows.className='checklist-group-items';
+    section.append(summary,description,rows);list.append(section);groups.set(item.group,rows);
+  }
   for(const item of items) {
     const row=document.createElement('div');row.className='checklist-row';
     const label=document.createElement('label'),input=document.createElement('input');input.type='checkbox';input.checked=item.completed;input.disabled=!parent;
@@ -120,7 +134,7 @@ function renderChecklist(items,album,parent) {
     if(item.momentId) {action.textContent='לצפייה ברגע';action.onclick=()=>{const card=document.getElementById('moment-'+item.momentId);card?.scrollIntoView({behavior:'smooth',block:'center'});card?.setAttribute('tabindex','-1');card?.focus({preventScroll:true});};row.append(action);}
     else if(item.completed&&parent) {action.textContent='תיעוד רגע';action.onclick=()=>openMoment(null,item);row.append(action);}
     input.onchange=async()=>{
-      const completed=input.checked;input.disabled=true;$('#checklist-error').textContent='';
+      const completed=input.checked;const controls=[...list.querySelectorAll('input,button')];controls.forEach(control=>control.disabled=true);$('#checklist-error').textContent='';
       try {
         const updated=await api('/api/checklist',{album,key:item.key,completed});
         if(current?.id!==album)return;
@@ -131,9 +145,9 @@ function renderChecklist(items,album,parent) {
           $('#milestone-create').onclick=()=>{$('#milestone-dialog').close();if(current?.id===album)openMoment(null,item);};
           $('#milestone-dialog').showModal();
         }
-      }catch(error){input.checked=!completed;input.disabled=false;if(current?.id===album)$('#checklist-error').textContent=error.message;}
+      }catch(error){input.checked=!completed;controls.forEach(control=>control.disabled=false);if(current?.id===album)$('#checklist-error').textContent=error.message;}
     };
-    list.append(row);
+    groups.get(item.group).append(row);
   }
 }
 function commentSection(moment) {

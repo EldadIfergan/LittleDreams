@@ -102,7 +102,7 @@ export default async function handler(req,res) {
         milestoneKey(b.key);if(typeof b.completed!=='boolean') fail(400,'סימון לא תקין');
         await query('INSERT INTO checklist(album_id,key,completed) VALUES($1,$2,$3) ON CONFLICT(album_id,key) DO UPDATE SET completed=excluded.completed',[album,b.key,Number(b.completed)]);
       }
-      return await finish(200,checklist(await query('SELECT * FROM checklist WHERE album_id=$1',[album])));
+      return await finish(200,checklist(await query('SELECT * FROM checklist WHERE album_id=$1',[album]),(await one('SELECT sex FROM albums WHERE id=$1',[album])).sex));
     }
     if(path==='/api/moments'&&!write) {
       const album=url.searchParams.get('album');await member(user,album);

@@ -189,7 +189,7 @@ const server = http.createServer(async (req,res) => {
         editor(user,album);milestoneKey(b.key);if(typeof b.completed!=='boolean') fail(400,'סימון לא תקין');
         db.prepare('INSERT INTO checklist(album_id,key,completed) VALUES(?,?,?) ON CONFLICT(album_id,key) DO UPDATE SET completed=excluded.completed').run(album,b.key,Number(b.completed));
       } else membership(user,album);
-      return send(res,200,checklist(db.prepare('SELECT * FROM checklist WHERE album_id=?').all(album)));
+      return send(res,200,checklist(db.prepare('SELECT * FROM checklist WHERE album_id=?').all(album),db.prepare('SELECT sex FROM albums WHERE id=?').get(album).sex));
     }
     if (path === '/api/moments' && req.method === 'GET') {
       const album = url.searchParams.get('album'); membership(user,album);

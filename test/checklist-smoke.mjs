@@ -12,6 +12,16 @@ const cookie=parent.cookie,album=(await call('/api/me',undefined,cookie)).value.
 const second=(await call('/api/albums',profile,cookie)).value.id;
 const read=async(id=album,c=cookie)=>call('/api/checklist?album='+id,undefined,c);
 assert.equal((await read()).value.every(i=>!i.completed),true);
+assert.ok(!(await read()).value.some(i=>i.key==='brit'));
+assert.equal((await call('/api/profile',{...profile,album,sex:'boy'},cookie)).status,200);
+assert.ok((await read()).value.some(i=>i.key==='brit'));
+assert.ok(!(await read()).value.some(i=>i.key==='simchat-bat'));
+assert.equal((await call('/api/checklist',{album,key:'brit',completed:true},cookie)).status,200);
+assert.equal((await call('/api/profile',{...profile,album,sex:'girl'},cookie)).status,200);
+assert.ok((await read()).value.some(i=>i.key==='simchat-bat'));
+assert.equal((await read()).value.find(i=>i.key==='brit').completed,true);
+assert.ok(!(await read(second)).value.some(i=>i.key==='brit'));
+assert.equal(new Set((await read()).value.map(i=>i.group)).size,6);
 assert.equal((await call('/api/checklist',{album,key:'smile',completed:true},cookie)).status,200);
 assert.equal((await read()).value.find(i=>i.key==='smile').completed,true);
 assert.equal((await read(second)).value.find(i=>i.key==='smile').completed,false);
