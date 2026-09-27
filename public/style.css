@@ -45,3 +45,5 @@ fieldset{border:0;padding:0;margin:24px 0}legend{font-size:16px;margin-bottom:14
 .checklist-group-items{display:grid;grid-template-columns:1fr 1fr;gap:0 24px}
 .checklist-row label{font-weight:normal}
 @media(max-width:600px){.checklist-group-items{grid-template-columns:1fr}}
+
+.media-pickers .upload{margin-bottom:12px}.file-picker-help{margin:12px 0}.file-picker-help summary{cursor:pointer;color:var(--green)}.file-picker-help p{font-size:.85rem;margin:12px 0}#file-selection-status{font-size:.9rem;color:var(--green)}

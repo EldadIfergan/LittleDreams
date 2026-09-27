@@ -192,7 +192,7 @@ const preparedFiles=new WeakMap(), uploadedFiles=new WeakMap();
 function openMoment(moment=null,milestone=null) {
   selectedMilestone=milestone;
   editingMoment=moment?.id ? moment : null; selectedFiles=[];removedFiles=new Set();
-  $('#moment-form').reset(); $('#moment-error').textContent='';$('#upload-progress').textContent='';
+  $('#moment-form').reset(); $('#file-selection-status').textContent=''; $('#moment-error').textContent='';$('#upload-progress').textContent='';
   $('#moment-title').textContent=editingMoment?'עריכת האירוע':'רגע קטן, זיכרון גדול';
   const now=new Date();now.setMinutes(now.getMinutes()-now.getTimezoneOffset());
   const form=$('#moment-form');form.elements.date.value=editingMoment?.date || now.toISOString().slice(0,10);
@@ -219,7 +219,18 @@ $('#add-button').onclick=()=>openMoment();$('#first-moment').onclick=()=>openMom
 document.querySelectorAll('.close').forEach(button=>button.onclick=()=>button.closest('dialog').close());
 $('#moment-dialog').addEventListener('cancel',event=>{if(uploadController)event.preventDefault();});
 $('#cancel-upload').onclick=()=>uploadController?.abort();
-$('#moment-form [name=files]').onchange=event=>{selectedFiles.push(...event.target.files);event.target.value='';renderFileList();};
+for(const name of ['files','videoFile','fallbackFile']) {
+  const picker=$('#moment-form [name='+name+']');
+  picker.onchange=event=>{
+    const incoming=Array.from(event.target.files||[]);event.target.value='';
+    if(!incoming.length)return;
+    const existing=(editingMoment?.files||[]).filter(file=>!removedFiles.has(file.id)).length;
+    if(existing+selectedFiles.length+incoming.length>10) {$('#moment-error').textContent='אפשר לצרף עד 10 קבצים לאירוע. בחרו פחות קבצים או הסירו קובץ מהרשימה.';return;}
+    selectedFiles.push(...incoming);renderFileList();$('#moment-error').textContent='';
+    $('#file-selection-status').textContent=incoming.length===1?'הקובץ התקבל: '+incoming[0].name+' · לחצו על שמירת הרגע כדי להעלות אותו.':incoming.length+' קבצים התקבלו · לחצו על שמירת הרגע כדי להעלות אותם.';
+    $('#file-selection-status').scrollIntoView({block:'nearest'});
+  };
+}
 const base64=file=>new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result.split(',')[1]);reader.onerror=()=>reject(new Error('לא ניתן לקרוא את הקובץ'));reader.readAsDataURL(file);});
 $('#moment-form').onsubmit=async event=>{
   event.preventDefault();if(uploadController)return;
