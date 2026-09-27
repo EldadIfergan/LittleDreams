@@ -1,4 +1,5 @@
 import http from 'node:http';
+import { validateAvatar } from './lib/avatar.js';
 import { DatabaseSync, backup } from 'node:sqlite';
 import { randomBytes, scryptSync, timingSafeEqual, createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync, existsSync, readdirSync, unlinkSync } from 'node:fs';
@@ -34,7 +35,7 @@ async function backupDatabase() {
   } catch(e) { console.error('Database backup failed:',e.message); }
   finally { backingUp = false; }
 }
-for (const [column,type] of [['child_name','TEXT'],['birth_date','TEXT'],['birth_weight','REAL'],['birth_length','REAL'],['sex','TEXT']]) {
+for (const [column,type] of [['child_name','TEXT'],['birth_date','TEXT'],['birth_weight','REAL'],['birth_length','REAL'],['sex','TEXT'],['avatar','TEXT']]) {
   if (!db.prepare('PRAGMA table_info(albums)').all().some(c => c.name === column)) db.exec(`ALTER TABLE albums ADD COLUMN ${column} ${type}`);
 }
 function childProfile(b) {
@@ -85,7 +86,7 @@ const server = http.createServer(async (req,res) => {
   res.setHeader('X-Content-Type-Options','nosniff');
   res.setHeader('Referrer-Policy','no-referrer');
   res.setHeader('Cache-Control','no-store');
-  res.setHeader('Content-Security-Policy',"default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' blob:; media-src 'self' blob:; object-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");
+  res.setHeader('Content-Security-Policy',"default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; object-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");
   try {
     const url = new URL(req.url,'http://localhost'); const path = url.pathname;
     if (path === '/api/config' && req.method === 'GET') return send(res,200,{directUploads:false});
@@ -142,7 +143,7 @@ const server = http.createServer(async (req,res) => {
       const b = await body(req); const name = text(b.albumName,80,'שם האלבום'); const profile = childProfile(b); const album = id();
       db.exec('BEGIN');
       try {
-        db.prepare('INSERT INTO albums(id,name,child_name,birth_date,birth_weight,birth_length,sex) VALUES(?,?,?,?,?,?,?)').run(album,name,...profile);
+        db.prepare('INSERT INTO albums(id,name,child_name,birth_date,birth_weight,birth_length,sex,avatar) VALUES(?,?,?,?,?,?,?,?)').run(album,name,...profile,b.avatar===undefined?null:validateAvatar(b.avatar));
         db.prepare('INSERT INTO members VALUES(?,?,?)').run(user,album,'parent');
         db.exec('COMMIT');
       } catch(e) { db.exec('ROLLBACK'); throw e; }
@@ -161,7 +162,7 @@ const server = http.createServer(async (req,res) => {
     }
     if (path === '/api/profile' && req.method === 'POST') {
       const b = await body(req); editor(user,b.album); const profile = childProfile(b);
-      db.prepare('UPDATE albums SET child_name=?,birth_date=?,birth_weight=?,birth_length=?,sex=? WHERE id=?').run(...profile,b.album);
+      db.prepare('UPDATE albums SET child_name=?,birth_date=?,birth_weight=?,birth_length=?,sex=?,name=COALESCE(?,name),avatar=COALESCE(?,avatar) WHERE id=?').run(...profile,b.albumName===undefined?null:text(b.albumName,80,'שם האלבום'),b.avatar===undefined?null:validateAvatar(b.avatar),b.album);
       return send(res,200,{ok:true});
     }
     if (path === '/api/me' && req.method === 'GET') return send(res,200,{
@@ -224,3 +225,4 @@ if (process.env.BACKUP_ENABLED === '1') {
   backupDatabase();
   setInterval(backupDatabase,24*60*60*1000).unref();
 }
+

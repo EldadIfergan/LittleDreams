@@ -181,6 +181,8 @@ const stages = [
 ];
 function sourceFor(stage) { return `https://me.health.gov.il/parenting/age-menu/${stage.slug}/grow-${stage.slug}/`; }
 function showProfile() {
+  $('#child-avatar').hidden = !current.avatar;
+  if (current.avatar) $('#child-avatar').src = current.avatar;
   document.documentElement.dataset.theme = current.sex || 'unspecified';
   const parent = current.role === 'parent';
   $('#edit-profile').hidden = !parent;
@@ -216,14 +218,21 @@ function showProfile() {
 $('#edit-profile').onclick = () => {
   creatingAlbum = false;
   $('#profile-title').textContent = 'פרטי הילד או הילדה';
-  $('#new-album-name').hidden = true; $('#new-album-name input').required = false;
+  $('#new-album-name').hidden = false; $('#new-album-name input').required = true;
   const form = $('#profile-form');
+  form.reset(); form.elements.albumName.value = current.name;
+  $('#avatar-preview').hidden = !current.avatar;
+  if (current.avatar) $('#avatar-preview').src = current.avatar;
   for (const [field,column] of [['childName','child_name'],['birthDate','birth_date'],['birthWeight','birth_weight'],['birthLength','birth_length'],['sex','sex']]) form.elements[field].value = current[column] ?? (field === 'sex' ? 'unspecified' : '');
   $('#profile-error').textContent=''; $('#profile-dialog').showModal();
 };
 $('#profile-form').onsubmit = event => {
   event.preventDefault(); busy(event.target,$('#profile-error'),async()=>{
-    const result = await api(creatingAlbum ? '/api/albums' : '/api/profile',{album:current.id,...Object.fromEntries(new FormData(event.target))});
+    const data = {album:current?.id,...Object.fromEntries(new FormData(event.target))};
+    delete data.avatarFile;
+    const file = event.target.elements.avatarFile.files[0];
+    if (file) data.avatar = await avatarImage(file);
+    const result = await api(creatingAlbum ? '/api/albums' : '/api/profile',data);
     if (creatingAlbum) current = {id:result.id};
     $('#profile-dialog').close(); await load();
   });
@@ -237,6 +246,7 @@ $('#my-albums-button').onclick = async () => {
     for (const album of albums) {
       const button = document.createElement('button'); button.className = 'album-tile'; button.dataset.sex = album.sex || 'unspecified';
       const name = document.createElement('strong'); name.textContent = album.name;
+      if (album.avatar) { const img = document.createElement('img'); img.className='child-avatar'; img.src=album.avatar; img.alt=album.child_name || 'תמונת פרופיל'; button.append(img); }
       const child = document.createElement('span'); child.textContent = album.child_name || 'פרטי הילד טרם הושלמו';
       const role = document.createElement('small'); role.textContent = album.role === 'parent' ? 'הורה · ניהול והוספת רגעים' : 'משפחה · צפייה ותגובות';
       button.append(name,child,role);
@@ -247,7 +257,20 @@ $('#my-albums-button').onclick = async () => {
 };
 $('#new-album-button').onclick = () => {
   creatingAlbum = true; $('#profile-form').reset(); $('#profile-error').textContent = '';
+  $('#avatar-preview').hidden = true;
   $('#profile-title').textContent = 'אלבום לילד נוסף';
   $('#new-album-name').hidden = false; $('#new-album-name input').required = true;
   $('#profile-dialog').showModal();
+};
+async function avatarImage(file) {
+  if (!['image/jpeg','image/png','image/webp'].includes(file.type) || file.size > 10*1024*1024) throw new Error('בחרו תמונת JPG, PNG או WebP עד 10MB');
+  const bitmap = await createImageBitmap(file);
+  const canvas = document.createElement('canvas'); canvas.width=160; canvas.height=160;
+  const size=Math.min(bitmap.width,bitmap.height);
+  canvas.getContext('2d').drawImage(bitmap,(bitmap.width-size)/2,(bitmap.height-size)/2,size,size,0,0,160,160);
+  bitmap.close(); return canvas.toDataURL('image/jpeg',0.75);
+}
+$('#profile-form [name=avatarFile]').onchange = async event => {
+  try { const file=event.target.files[0]; if (!file) return; $('#avatar-preview').src=await avatarImage(file); $('#avatar-preview').hidden=false; $('#profile-error').textContent=''; }
+  catch(e) { $('#profile-error').textContent=e.message; }
 };

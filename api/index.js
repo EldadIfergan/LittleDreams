@@ -1,4 +1,5 @@
 import pg from 'pg';
+import { validateAvatar } from '../lib/avatar.js';
 import { readFileSync } from 'node:fs';
 import { createClient } from '@supabase/supabase-js';
 import { randomBytes, createHash, scryptSync, timingSafeEqual } from 'node:crypto';
@@ -52,7 +53,7 @@ export default async function handler(req,res) {
       await query('INSERT INTO members VALUES($1,$2,$3)',[user,invite.album_id,invite.role]);await query('UPDATE invites SET used=1 WHERE token=$1',[invite.token]);
     }
     async function createAlbum(user,b) {
-      const album=id();await query('INSERT INTO albums VALUES($1,$2,$3,$4,$5,$6,$7)',[album,text(b.albumName,80),...profile(b)]);
+      const album=id();await query('INSERT INTO albums(id,name,child_name,birth_date,birth_weight,birth_length,sex,avatar) VALUES($1,$2,$3,$4,$5,$6,$7,$8)',[album,text(b.albumName,80),...profile(b),b.avatar===undefined?null:validateAvatar(b.avatar)]);
       await query('INSERT INTO members VALUES($1,$2,$3)',[user,album,'parent']);return album;
     }
     if(write && ['/api/login','/api/register'].includes(path)) {
@@ -82,7 +83,7 @@ export default async function handler(req,res) {
     if(path==='/api/me'&&!write) return await finish(200,{user:await one('SELECT name,email FROM users WHERE id=$1',[user]),albums:await query('SELECT a.*,m.role FROM albums a JOIN members m ON a.id=m.album_id WHERE m.user_id=$1 ORDER BY a.name',[user])});
     if(path==='/api/logout'&&write) {await query('DELETE FROM sessions WHERE token=$1',[hash(token)]);res.setHeader('Set-Cookie','session=; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=0');return await finish(200,{ok:true});}
     if(path==='/api/albums'&&write) return await finish(201,{id:await createAlbum(user,b)});
-    if(path==='/api/profile'&&write) {await member(user,b.album,true);await query('UPDATE albums SET child_name=$1,birth_date=$2,birth_weight=$3,birth_length=$4,sex=$5 WHERE id=$6',[...profile(b),b.album]);return await finish(200,{ok:true});}
+    if(path==='/api/profile'&&write) {await member(user,b.album,true);await query('UPDATE albums SET child_name=$1,birth_date=$2,birth_weight=$3,birth_length=$4,sex=$5,name=COALESCE($7,name),avatar=COALESCE($8,avatar) WHERE id=$6',[...profile(b),b.album,b.albumName===undefined?null:text(b.albumName,80),b.avatar===undefined?null:validateAvatar(b.avatar)]);return await finish(200,{ok:true});}
     if(path==='/api/accept'&&write) {await accept(user,b.token);return await finish(200,{ok:true});}
     if(path==='/api/invites'&&write) {
       await member(user,b.album,true);if(!['parent','viewer'].includes(b.role)) fail(400,'תפקיד לא תקין');
@@ -133,3 +134,4 @@ export default async function handler(req,res) {
     send(e.status||500,{error:e.status?e.message:'משהו השתבש. נסו שוב.'});
   } finally {client?.release();}
 }
+
