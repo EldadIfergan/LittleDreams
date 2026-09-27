@@ -1,6 +1,7 @@
 // Explicit opt-in only: creates isolated synthetic albums on the supplied site.
 import assert from 'node:assert/strict';
 import {randomBytes} from 'node:crypto';
+import {readFileSync} from 'node:fs';
 if(!process.env.SMOKE_BASE) { console.log('Live smoke skipped: set SMOKE_BASE to run.'); process.exit(0); }
 const base=process.env.SMOKE_BASE, suffix=randomBytes(8).toString('hex');
 const password=randomBytes(24).toString('base64url');
@@ -15,6 +16,9 @@ assert.equal(parent.status,200,JSON.stringify(parent.value));
 const cookie=parent.cookie;
 const me=await call('/api/me',undefined,cookie);assert.equal(me.status,200);
 const album=me.value.albums[0].id;
+const avatar='data:image/jpeg;base64,'+readFileSync(new URL('./avatar-fixture.txt',import.meta.url),'utf8').trim();
+assert.equal((await call('/api/profile',{...details,album,albumName:'תמונת פרופיל',avatar},cookie)).status,200);
+assert.equal((await call('/api/me',undefined,cookie)).value.albums.find(a=>a.id===album).avatar,avatar);
 assert.equal((await call('/api/profile',{...details,album,albumName:'שם אלבום מעודכן'},cookie)).status,200);
 assert.equal((await call('/api/me',undefined,cookie)).value.albums.find(a=>a.id===album).name,'שם אלבום מעודכן');
 assert.equal((await call('/api/profile',{...details,album,albumName:'   '},cookie)).status,400);
@@ -30,6 +34,7 @@ const invitation=await call('/api/invites',{album,role:'viewer'},cookie);assert.
 const viewer=await call('/api/register',{name:'Family test',email:`smoke-viewer-${suffix}@example.test`,password,invite:invitation.value.token});assert.equal(viewer.status,200);
 assert.equal((await call('/api/comments',{moment:moment.value.id,body:'בדיקת תגובה משפחתית'},viewer.cookie)).status,201);
 assert.equal((await call('/api/uploads',{album,name:'forbidden.png',type:'image/png',size:1},viewer.cookie)).status,403);
+assert.equal((await call('/api/profile',{...details,album,albumName:'אסור',avatar},viewer.cookie)).status,403);
 assert.equal((await call('/api/moments?album='+second.value.id,undefined,viewer.cookie)).status,403);
 assert.equal((await call('/api/files/'+upload.value.id)).status,401);
 const file=await call('/api/files/'+upload.value.id,undefined,viewer.cookie);assert.equal(file.status,302);
