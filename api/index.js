@@ -101,7 +101,7 @@ export default async function handler(req,res) {
     }
     if(path==='/api/uploads'&&write) {
       await member(user,b.album,true);
-      if(!types.includes(b.type)||!Number.isInteger(b.size)||b.size<=0||b.size>20971520) fail(400,'סוג הקובץ או גודלו אינם נתמכים');
+      if(!types.includes(b.type)||!Number.isInteger(b.size)||b.size<=0||b.size>52428800) fail(400,'סוג הקובץ או גודלו אינם נתמכים');
       const name=text(b.name,200),file=id();
       await query('INSERT INTO pending_uploads VALUES($1,$2,$3,$4,$5,$6,$7)',[file,b.album,user,name,b.type,b.size,Date.now()+7200000]);
       const signed=await storage.createSignedUploadUrl(file);if(signed.error) throw signed.error;
@@ -110,13 +110,13 @@ export default async function handler(req,res) {
     if(path==='/api/moments'&&write) {
       await member(user,b.album,true);const title=text(b.title,120);
       if(typeof b.date!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(b.date)||!Number.isFinite(Date.parse(b.date))||new Date(b.date).toISOString().slice(0,10)!==b.date) fail(400,'תאריך האירוע אינו תקין');
-      if(typeof b.description!=='string'||b.description.length>5000||!Array.isArray(b.files)||b.files.length>5||new Set(b.files.map(f=>f.id)).size!==b.files.length) fail(400,'פרטי הרגע אינם תקינים');
+      if(typeof b.description!=='string'||b.description.length>5000||!Array.isArray(b.files)||b.files.length>10||new Set(b.files.map(f=>f.id)).size!==b.files.length) fail(400,'פרטי הרגע אינם תקינים');
       const moment=id();const files=[];let total=0;
       for(const f of b.files) {
         const pending=await one('SELECT * FROM pending_uploads WHERE id=$1 AND user_id=$2 AND album_id=$3 AND expires>$4 FOR UPDATE',[text(f.id,80),user,b.album,Date.now()]);
         if(!pending) fail(400,'העלאת הקובץ אינה תקפה');
         const info=await storage.info(pending.id);if(info.error||Number(info.data.size)!==Number(pending.size)||info.data.contentType!==pending.type) fail(400,'הקובץ לא הועלה במלואו או שסוגו אינו תואם');
-        total+=Number(pending.size);if(total>20971520) fail(400,'אפשר לצרף עד 20MB לרגע');files.push(pending);
+        total+=Number(pending.size);if(total>104857600) fail(400,'אפשר לצרף עד 100MB לרגע');files.push(pending);
       }
       await query('INSERT INTO moments VALUES($1,$2,$3,$4,$5,$6)',[moment,b.album,title,b.date,b.description.trim(),Date.now()]);
       for(const f of files){await query('INSERT INTO files VALUES($1,$2,$3,$4)',[f.id,moment,f.name,f.type]);await query('DELETE FROM pending_uploads WHERE id=$1',[f.id]);}

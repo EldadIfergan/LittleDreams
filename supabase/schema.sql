@@ -35,7 +35,7 @@ create table if not exists little_dreams.comments (
 create table if not exists little_dreams.pending_uploads (
   id text primary key, album_id text not null references little_dreams.albums(id),
   user_id text not null references little_dreams.users(id), name text not null, type text not null,
-  size bigint not null check(size > 0 and size <= 20971520), expires bigint not null
+  size bigint not null check(size > 0 and size <= 52428800), expires bigint not null
 );
 create table if not exists little_dreams.login_attempts (
   key text primary key, count integer not null, expires bigint not null
@@ -58,6 +58,6 @@ commit;
 
 -- No public storage policies: signed access is issued by the server after membership checks.
 insert into storage.buckets(id,name,public,file_size_limit,allowed_mime_types)
-values('little-dreams','little-dreams',false,20971520,
+values('little-dreams','little-dreams',false,52428800,
   array['image/jpeg','image/png','image/webp','image/gif','video/mp4','video/webm','application/pdf'])
 on conflict(id) do nothing;

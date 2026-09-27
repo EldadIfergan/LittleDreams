@@ -141,7 +141,7 @@ const base64 = file => new Promise((resolve,reject) => { const reader = new File
 $('#moment-form').onsubmit = event => {
   event.preventDefault(); busy(event.target,$('#moment-error'),async () => {
     const form = new FormData(event.target); const files = [...event.target.elements.files.files];
-    if (files.length > 5 || files.reduce((s,f) => s+f.size,0) > 20*1024*1024) throw new Error('אפשר לצרף עד 5 קבצים ו־20MB בסך הכול');
+    if (files.length > 10 || files.some(f => f.size > 50*1024*1024) || files.reduce((s,f) => s+f.size,0) > 100*1024*1024) throw new Error('אפשר לצרף עד 10 קבצים, 50MB לקובץ ו־100MB בסך הכול');
     const config = await api('/api/config');
     const attachments = [];
     for (const file of files) {

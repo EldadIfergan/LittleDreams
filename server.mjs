@@ -59,7 +59,7 @@ function text(value, max, label) {
 }
 async function body(req) {
   let size = 0; const chunks = [];
-  for await (const chunk of req) { size += chunk.length; if (size > 30 * 1024 * 1024) fail(413,'הקבצים גדולים מדי. אפשר לצרף עד 20MB לרגע.'); chunks.push(chunk); }
+  for await (const chunk of req) { size += chunk.length; if (size > 140 * 1024 * 1024) fail(413,'הקבצים גדולים מדי. אפשר לצרף עד 100MB לרגע.'); chunks.push(chunk); }
   try { return JSON.parse(Buffer.concat(chunks).toString()); } catch { fail(400,'הבקשה אינה תקינה'); }
 }
 function send(res, status, value, headers = {}) {
@@ -192,12 +192,12 @@ const server = http.createServer(async (req,res) => {
       const title = text(b.title,120,'שם הרגע');
       if (!/^\d{4}-\d{2}-\d{2}$/.test(b.date || '') || !Number.isFinite(Date.parse(b.date)) || new Date(b.date).toISOString().slice(0,10) !== b.date) fail(400,'יש לבחור תאריך תקין');
       if (typeof b.description !== 'string' || b.description.length > 5000) fail(400,'התיאור ארוך מדי');
-      if (!Array.isArray(b.files) || b.files.length > 5) fail(400,'אפשר לצרף עד חמישה קבצים');
+      if (!Array.isArray(b.files) || b.files.length > 10) fail(400,'אפשר לצרף עד 10 קבצים');
       let total = 0;
       const files = b.files.map(f => {
         if (!allowed.has(f.type) || typeof f.data !== 'string') fail(400,'אפשר להעלות תמונות, סרטוני MP4 או WebM ומסמכי PDF');
         const bytes = Buffer.from(f.data,'base64'); total += bytes.length;
-        if (!bytes.length || total > 20*1024*1024) fail(413,'אפשר לצרף עד 20MB לרגע');
+        if (!bytes.length || bytes.length > 50*1024*1024 || total > 100*1024*1024) fail(413,'אפשר לצרף עד 100MB לרגע');
         return {id:id(),name:text(f.name,200,'שם הקובץ'),type:f.type,bytes};
       });
       const moment = id();
