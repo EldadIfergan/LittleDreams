@@ -1,5 +1,6 @@
 import { birthTime } from '../lib/birth-time.js';
 import pg from 'pg';
+import { planEdit } from '../lib/event-edit.js';
 import { validateAvatar } from '../lib/avatar.js';
 import { readFileSync } from 'node:fs';
 import { createClient } from '@supabase/supabase-js';
@@ -111,17 +112,33 @@ export default async function handler(req,res) {
     if(path==='/api/moments'&&write) {
       await member(user,b.album,true);const title=text(b.title,120);
       if(typeof b.date!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(b.date)||!Number.isFinite(Date.parse(b.date))||new Date(b.date).toISOString().slice(0,10)!==b.date) fail(400,'תאריך האירוע אינו תקין');
-      if(typeof b.description!=='string'||b.description.length>5000||!Array.isArray(b.files)||b.files.length>10||new Set(b.files.map(f=>f.id)).size!==b.files.length) fail(400,'פרטי הרגע אינם תקינים');
-      const moment=id();const files=[];let total=0;
+      if(typeof b.description!=='string'||b.description.length>5000||!Array.isArray(b.files)||b.files.length>10||b.files.some(f=>!f||typeof f.id!=='string')||new Set(b.files.map(f=>f.id)).size!==b.files.length) fail(400,'פרטי הרגע אינם תקינים');
+      const moment=b.id ? text(b.id,80) : id();const files=[];let total=0;
+      let edit;
+      if (b.id) {
+        const existing=await one('SELECT * FROM moments WHERE id=$1 FOR UPDATE',[moment]);
+        const existingFiles=await query('SELECT id,name,type FROM files WHERE moment_id=$1',[moment]);
+        edit=planEdit(b,existing,existingFiles);
+        if(edit.kept.length+b.files.length>10) fail(400,'אפשר לשמור עד 10 קבצים באירוע');
+        const sizes=await Promise.all(edit.kept.map(async f=>{const result=await storage.info(f.id);if(result.error) throw result.error;return Number(result.data.size);}));
+        total=sizes.reduce((sum,size)=>sum+size,0);
+        if(!Number.isFinite(total)||total>104857600) fail(400,'אפשר לצרף עד 100MB לרגע');
+      }
       for(const f of b.files) {
         const pending=await one('SELECT * FROM pending_uploads WHERE id=$1 AND user_id=$2 AND album_id=$3 AND expires>$4 FOR UPDATE',[text(f.id,80),user,b.album,Date.now()]);
         if(!pending) fail(400,'העלאת הקובץ אינה תקפה');
         const info=await storage.info(pending.id);if(info.error||Number(info.data.size)!==Number(pending.size)||info.data.contentType!==pending.type) fail(400,'הקובץ לא הועלה במלואו או שסוגו אינו תואם');
         total+=Number(pending.size);if(total>104857600) fail(400,'אפשר לצרף עד 100MB לרגע');files.push(pending);
       }
-      await query('INSERT INTO moments VALUES($1,$2,$3,$4,$5,$6)',[moment,b.album,title,b.date,b.description.trim(),Date.now()]);
+      if(edit) {
+        await query('UPDATE moments SET title=$1,date=$2,description=$3 WHERE id=$4',[title,b.date,b.description.trim(),moment]);
+        for(const f of edit.removed) await query('DELETE FROM files WHERE id=$1 AND moment_id=$2',[f.id,moment]);
+      } else await query('INSERT INTO moments VALUES($1,$2,$3,$4,$5,$6)',[moment,b.album,title,b.date,b.description.trim(),Date.now()]);
       for(const f of files){await query('INSERT INTO files VALUES($1,$2,$3,$4)',[f.id,moment,f.name,f.type]);await query('DELETE FROM pending_uploads WHERE id=$1',[f.id]);}
-      return await finish(201,{id:moment});
+      await client.query('COMMIT');
+      // Remove objects only after the event update has committed. Never delete retained files.
+      if(edit?.removed.length) {try {const cleanup=await storage.remove(edit.removed.map(f=>f.id));if(cleanup.error) console.error('Detached file cleanup failed');} catch {console.error('Detached file cleanup failed');}}
+      return send(edit?200:201,{id:moment});
     }
     if(path.startsWith('/api/files/')&&!write) {
       const f=await one('SELECT f.*,m.album_id FROM files f JOIN moments m ON m.id=f.moment_id WHERE f.id=$1',[path.split('/').pop()]);if(!f) fail(404,'הקובץ לא נמצא');await member(user,f.album_id);

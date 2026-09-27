@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.117.2",
+    "mediabunny": "^1.60.0",
     "pg": "^8.23.0"
   }
 }

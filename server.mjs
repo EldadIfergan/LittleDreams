@@ -1,9 +1,10 @@
+import { planEdit } from './lib/event-edit.js';
 import { birthTime } from './lib/birth-time.js';
 import http from 'node:http';
 import { validateAvatar } from './lib/avatar.js';
 import { DatabaseSync, backup } from 'node:sqlite';
 import { randomBytes, scryptSync, timingSafeEqual, createHash } from 'node:crypto';
-import { mkdirSync, readFileSync, writeFileSync, existsSync, readdirSync, unlinkSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync, existsSync, statSync, readdirSync, unlinkSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 
 const root = resolve(import.meta.dirname);
@@ -98,9 +99,9 @@ const server = http.createServer(async (req,res) => {
       if (req.headers.origin && req.headers.origin !== `http://${req.headers.host}` && req.headers.origin !== `https://${req.headers.host}`) fail(403,'מקור הבקשה אינו מורשה');
       if (!req.headers['content-type']?.startsWith('application/json')) fail(415,'נדרשת בקשת JSON');
     }
-    if (req.method === 'GET' && ['/', '/app.js', '/style.css','/favicon.svg'].includes(path)) {
+    if (req.method === 'GET' && ['/', '/app.js', '/style.css','/favicon.svg','/media.js','/vendor/mediabunny.mjs'].includes(path)) {
       const name = path === '/' ? 'index.html' : path.slice(1);
-      res.setHeader('Content-Type', {html:'text/html; charset=utf-8',js:'text/javascript; charset=utf-8',css:'text/css; charset=utf-8',svg:'image/svg+xml'}[name.split('.').pop()]);
+      res.setHeader('Content-Type', {html:'text/html; charset=utf-8',js:'text/javascript; charset=utf-8',mjs:'text/javascript; charset=utf-8',css:'text/css; charset=utf-8',svg:'image/svg+xml'}[name.split('.').pop()]);
       return res.end(readFileSync(join(root,'public',name)));
     }
     if (req.method === 'POST' && ['/api/register','/api/login'].includes(path)) {
@@ -195,20 +196,26 @@ const server = http.createServer(async (req,res) => {
       if (typeof b.description !== 'string' || b.description.length > 5000) fail(400,'התיאור ארוך מדי');
       if (!Array.isArray(b.files) || b.files.length > 10) fail(400,'אפשר לצרף עד 10 קבצים');
       let total = 0;
+      const moment=b.id ? text(b.id,80,'מזהה האירוע') : id();
+      const edit=b.id ? planEdit(b,db.prepare('SELECT * FROM moments WHERE id=?').get(moment),db.prepare('SELECT id,name,type FROM files WHERE moment_id=?').all(moment)) : null;
+      if(edit) {if(edit.kept.length+b.files.length>10)fail(400,'אפשר לשמור עד 10 קבצים באירוע');total=edit.kept.reduce((sum,f)=>sum+statSync(join(data,'uploads',f.id)).size,0);}
       const files = b.files.map(f => {
         if (!allowed.has(f.type) || typeof f.data !== 'string') fail(400,'אפשר להעלות תמונות, סרטוני MP4 או WebM ומסמכי PDF');
         const bytes = Buffer.from(f.data,'base64'); total += bytes.length;
         if (!bytes.length || bytes.length > 50*1024*1024 || total > 100*1024*1024) fail(413,'אפשר לצרף עד 100MB לרגע');
         return {id:id(),name:text(f.name,200,'שם הקובץ'),type:f.type,bytes};
       });
-      const moment = id();
       db.exec('BEGIN');
       try {
-        db.prepare('INSERT INTO moments VALUES(?,?,?,?,?,?)').run(moment,b.album,title,b.date,b.description.trim(),Date.now());
+        if(edit) {
+          db.prepare('UPDATE moments SET title=?,date=?,description=? WHERE id=?').run(title,b.date,b.description.trim(),moment);
+          for(const f of edit.removed) db.prepare('DELETE FROM files WHERE id=? AND moment_id=?').run(f.id,moment);
+        } else db.prepare('INSERT INTO moments VALUES(?,?,?,?,?,?)').run(moment,b.album,title,b.date,b.description.trim(),Date.now());
         for (const f of files) { writeFileSync(join(data,'uploads',f.id),f.bytes); db.prepare('INSERT INTO files VALUES(?,?,?,?)').run(f.id,moment,f.name,f.type); }
         db.exec('COMMIT');
       } catch(e) { db.exec('ROLLBACK'); throw e; }
-      return send(res,201,{id:moment});
+      if(edit) for(const f of edit.removed) {try {unlinkSync(join(data,'uploads',f.id));}catch {console.error('Detached file cleanup failed');}}
+      return send(res,edit?200:201,{id:moment});
     }
     if (path.startsWith('/api/files/') && req.method === 'GET') {
       const f = db.prepare('SELECT f.*,m.album_id FROM files f JOIN moments m ON m.id=f.moment_id WHERE f.id=?').get(path.split('/').pop());

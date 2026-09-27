@@ -77,6 +77,7 @@ async function showAlbum() {
     const title = document.createElement('h2'); title.textContent = moment.title;
     const description = document.createElement('p'); description.textContent = moment.description;
     content.append(date,title);
+    if (parent) { const edit=document.createElement('button'); edit.type='button';edit.className='quiet';edit.textContent='עריכת אירוע';edit.onclick=()=>openMoment(moment);content.append(edit); }
     const details = document.createElement('details');
     const summary = document.createElement('summary'); summary.textContent = 'הסיפור והקבצים';
     details.append(summary,description);
@@ -128,33 +129,79 @@ function commentSection(moment) {
 }
 $('#album-picker').onchange = async event => { current = albums.find(a => a.id === event.target.value); try { await showAlbum(); } catch(e) { $('#page-error').textContent = e.message; } };
 $('#logout').onclick = async () => { try { await api('/api/logout',{}); current = null; await load(); } catch(e) { $('#page-error').textContent = e.message; } };
-function openMoment() {
-  $('#moment-form').reset(); $('#moment-error').textContent = ''; $('#file-list').textContent = '';
-  const now = new Date(); now.setMinutes(now.getMinutes()-now.getTimezoneOffset());
-  $('#moment-form [name=date]').value = now.toISOString().slice(0,10);
-  $('#moment-dialog').showModal();
+let editingMoment=null, selectedFiles=[], removedFiles=new Set(), uploadController=null;
+const preparedFiles=new WeakMap(), uploadedFiles=new WeakMap();
+function openMoment(moment=null) {
+  editingMoment=moment?.id ? moment : null; selectedFiles=[];removedFiles=new Set();
+  $('#moment-form').reset(); $('#moment-error').textContent='';$('#upload-progress').textContent='';
+  $('#moment-title').textContent=editingMoment?'עריכת האירוע':'רגע קטן, זיכרון גדול';
+  const now=new Date();now.setMinutes(now.getMinutes()-now.getTimezoneOffset());
+  const form=$('#moment-form');form.elements.date.value=editingMoment?.date || now.toISOString().slice(0,10);
+  form.elements.title.value=editingMoment?.title || '';form.elements.description.value=editingMoment?.description || '';
+  renderFileList();$('#moment-dialog').showModal();
 }
-$('#add-button').onclick = openMoment; $('#first-moment').onclick = openMoment;
-document.querySelectorAll('.close').forEach(button => button.onclick = () => button.closest('dialog').close());
-$('#moment-form [name=files]').onchange = event => { $('#file-list').textContent = [...event.target.files].map(f => f.name).join(' · '); };
-const base64 = file => new Promise((resolve,reject) => { const reader = new FileReader(); reader.onload = () => resolve(reader.result.split(',')[1]); reader.onerror = () => reject(new Error('לא ניתן לקרוא את הקובץ')); reader.readAsDataURL(file); });
-$('#moment-form').onsubmit = event => {
-  event.preventDefault(); busy(event.target,$('#moment-error'),async () => {
-    const form = new FormData(event.target); const files = [...event.target.elements.files.files];
-    if (files.length > 10 || files.some(f => f.size > 50*1024*1024) || files.reduce((s,f) => s+f.size,0) > 100*1024*1024) throw new Error('אפשר לצרף עד 10 קבצים, 50MB לקובץ ו־100MB בסך הכול');
-    const config = await api('/api/config');
-    const attachments = [];
-    for (const file of files) {
-      if (config.directUploads) {
-        const upload = await api('/api/uploads',{album:current.id,name:file.name,type:file.type,size:file.size});
-        const response = await fetch(upload.url,{method:'PUT',headers:{'Content-Type':file.type,'x-upsert':'false'},body:file});
-        if (!response.ok) throw new Error('העלאת הקובץ נכשלה. הפרטים נשמרו בטופס ואפשר לנסות שוב.');
+function renderFileList() {
+  const list=$('#file-list');list.replaceChildren();
+  for(const file of editingMoment?.files || []) {
+    const row=document.createElement('div');row.className='attachment-row';
+    const removed=removedFiles.has(file.id);
+    if(file.type.startsWith('image/')) { const img=document.createElement('img');img.src=`/api/files/${file.id}`;img.alt=file.name;row.append(img); }
+    const name=document.createElement('span');name.textContent=file.name+(removed?' · יוסר בשמירה':'');
+    const button=document.createElement('button');button.type='button';button.className='quiet';button.textContent=removed?'ביטול הסרה':'הסרה';
+    button.onclick=()=>{removed?removedFiles.delete(file.id):removedFiles.add(file.id);renderFileList();};
+    row.append(name,button);list.append(row);
+  }
+  selectedFiles.forEach((file,index)=>{
+    const row=document.createElement('div');row.className='attachment-row';const name=document.createElement('span');name.textContent=`${file.name} · ${(file.size/1024/1024).toFixed(1)}MB · חדש`;
+    const button=document.createElement('button');button.type='button';button.className='quiet';button.textContent='הסרה';button.onclick=()=>{selectedFiles.splice(index,1);renderFileList();};row.append(name,button);list.append(row);
+  });
+}
+$('#add-button').onclick=()=>openMoment();$('#first-moment').onclick=()=>openMoment();
+document.querySelectorAll('.close').forEach(button=>button.onclick=()=>button.closest('dialog').close());
+$('#moment-dialog').addEventListener('cancel',event=>{if(uploadController)event.preventDefault();});
+$('#cancel-upload').onclick=()=>uploadController?.abort();
+$('#moment-form [name=files]').onchange=event=>{selectedFiles.push(...event.target.files);event.target.value='';renderFileList();};
+const base64=file=>new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result.split(',')[1]);reader.onerror=()=>reject(new Error('לא ניתן לקרוא את הקובץ'));reader.readAsDataURL(file);});
+$('#moment-form').onsubmit=async event=>{
+  event.preventDefault();if(uploadController)return;
+  const element=event.target,form=new FormData(element),album=current.id,moment=editingMoment;
+  const kept=(moment?.files || []).filter(f=>!removedFiles.has(f.id)).map(f=>f.id);
+  const controller=new AbortController();uploadController=controller;
+  const controls=[...element.querySelectorAll('input,textarea,button')];controls.forEach(c=>c.disabled=true);
+  $('#cancel-upload').hidden=false;$('#cancel-upload').disabled=false;$('#moment-error').textContent='';
+  const progress=message=>$('#upload-progress').textContent=message;
+  try {
+    if(kept.length+selectedFiles.length>10)throw new Error('אפשר לשמור עד 10 קבצים באירוע. הסירו קובץ מהרשימה ונסו שוב');
+    const {prepareMedia,uploadFile}=await import('/media.js');
+    const files=[];let total=0;
+    const compress=$('#compress-videos').checked;
+    for(const source of selectedFiles) {
+      const cached=preparedFiles.get(source);
+      const file=cached?.compress===compress?cached.file:await prepareMedia(source,{compress,signal:controller.signal,onProgress:message=>progress(`${source.name}: ${message}`)});
+      preparedFiles.set(source,{compress,file});total+=file.size;
+      if(file.size>50*1024*1024)throw new Error(`${source.name}: הקובץ גדול מ־50MB. הפעילו הקטנת סרטונים או בחרו קובץ קטן יותר`);
+      if(total>100*1024*1024)throw new Error('הקבצים לאחר ההקטנה גדולים מ־100MB. פצלו למספר אירועים');
+      files.push(file);
+    }
+    const config=await api('/api/config'),attachments=[];
+    for(const [index,file] of files.entries()) {
+      if(controller.signal.aborted)throw new DOMException('הפעולה בוטלה','AbortError');
+      if(config.directUploads) {
+        let upload=uploadedFiles.get(file);
+        if(!upload || upload.album!==album || upload.expires<Date.now()) {
+          upload=await api('/api/uploads',{album,name:file.name,type:file.type,size:file.size});
+          await uploadFile(upload.url,file,{signal:controller.signal,onProgress:p=>progress(`מעלים קובץ ${index+1} מתוך ${files.length}: ${p}%`)});
+          upload={...upload,album,expires:Date.now()+3600000};uploadedFiles.set(file,upload);
+        }
         attachments.push({id:upload.id});
       } else attachments.push({name:file.name,type:file.type,data:await base64(file)});
     }
-    await api('/api/moments',{album:current.id,title:form.get('title'),date:form.get('date'),description:form.get('description'),files:attachments});
-    $('#moment-dialog').close(); await showAlbum();
-  });
+    if(controller.signal.aborted)throw new DOMException('הפעולה בוטלה','AbortError');
+    progress('שומרים את האירוע…');$('#cancel-upload').disabled=true;
+    await api('/api/moments',{album,title:form.get('title'),date:form.get('date'),description:form.get('description'),files:attachments,...(moment?{id:moment.id,keepFiles:kept,original:{title:moment.title,date:moment.date,description:moment.description,files:moment.files.map(f=>f.id)}}:{})});
+    files.forEach(file=>uploadedFiles.delete(file));$('#moment-dialog').close();await showAlbum();
+  } catch(error) {$('#moment-error').textContent=error.name==='AbortError'?'הפעולה בוטלה. האירוע לא השתנה ואפשר לנסות שוב.':error.message;}
+  finally {uploadController=null;controls.forEach(c=>c.disabled=false);$('#cancel-upload').hidden=true;progress('');}
 };
 $('#invite-button').onclick = () => { $('#invite-result').hidden = true; $('#invite-error').textContent = ''; $('#invite-result small').textContent = location.hostname === 'localhost' ? 'בסביבה המקומית הקישור פועל רק במחשב הזה.' : 'אפשר לשלוח את הקישור באופן פרטי לאדם שהזמנתם.'; $('#invite-dialog').showModal(); };
 $('#invite-form').onsubmit = event => {
