@@ -4,6 +4,8 @@ import pg from 'pg';
 import { planEdit } from '../lib/event-edit.js';
 import { photoDetails, requestFiles, reviewDecision, approvalCapacity } from '../lib/photo-requests.js';
 import { ensurePhotoSchema } from '../lib/photo-schema.js';
+import { ensureFamilySchema } from '../lib/family-schema.js';
+import { familyDetails, familyAuthor, familySessionSeconds, inviteToken } from '../lib/family.js';
 import { validateAvatar } from '../lib/avatar.js';
 import { readFileSync } from 'node:fs';
 import { createClient } from '@supabase/supabase-js';
@@ -38,6 +40,7 @@ export default async function handler(req,res) {
     const b=write ? req.body : {};
     if(write && (!b || typeof b!=='object' || Array.isArray(b) || Buffer.byteLength(JSON.stringify(b))>65536)) fail(400,'הבקשה אינה תקינה או גדולה מדי');
     await ensurePhotoSchema(pool);
+    await ensureFamilySchema(pool);
     client=await pool.connect();
     await client.query('BEGIN');
     await client.query('SET LOCAL search_path TO little_dreams, pg_catalog');
@@ -54,14 +57,38 @@ export default async function handler(req,res) {
     async function accept(user,token) {
       const invite=await one('SELECT * FROM invites WHERE token=$1 AND used=0 AND expires>$2 FOR UPDATE',[hash(text(token,100)),Date.now()]);
       if(!invite) fail(400,'ההזמנה אינה תקפה או שכבר נוצלה');
+      if(invite.role==='parent' && !(await one('SELECT password FROM users WHERE id=$1',[user]))?.password) fail(403,'להצטרפות כהורה יש להיכנס עם חשבון הורה');
       await query('SELECT id FROM albums WHERE id=$1 FOR UPDATE',[invite.album_id]);
       if(invite.role==='parent' && Number((await one("SELECT count(*) AS n FROM members WHERE album_id=$1 AND role='parent'",[invite.album_id])).n)>=2) fail(400,'לאלבום כבר משויכים שני הורים');
       if(await one('SELECT 1 FROM members WHERE user_id=$1 AND album_id=$2',[user,invite.album_id])) fail(400,'כבר יש לך גישה לאלבום');
       await query('INSERT INTO members VALUES($1,$2,$3)',[user,invite.album_id,invite.role]);await query('UPDATE invites SET used=1 WHERE token=$1',[invite.token]);
     }
     async function createAlbum(user,b) {
+      if(!(await one('SELECT password FROM users WHERE id=$1',[user]))?.password) fail(403,'יצירת אלבום זמינה לחשבון הורה');
       const album=id();await query('INSERT INTO albums(id,name,child_name,birth_date,birth_weight,birth_length,sex,avatar,birth_time) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)',[album,text(b.childName,80),...profile(b),b.avatar===undefined?null:validateAvatar(b.avatar),birthTime(b.birthTime)]);
       await query('INSERT INTO members VALUES($1,$2,$3)',[user,album,'parent']);return album;
+    }
+    if((path==='/api/invites/info'&&!write)||(path==='/api/family/join'&&write)) {
+      const details=write?familyDetails(b):null;
+      const inviteHash=hash(inviteToken(write?b.invite:url.searchParams.get('token')));
+      const invitation=await one('SELECT i.*,a.child_name,a.name,a.sex FROM invites i JOIN albums a ON a.id=i.album_id WHERE i.token=$1'+(write?' FOR UPDATE OF i':''),[inviteHash]);
+      if(!invitation)fail(400,'קישור ההזמנה אינו תקין. בקשו מההורים קישור חדש.');
+      const sessionToken=/(?:^|;\s*)session=([a-f0-9]+)/.exec(req.headers.cookie||'')?.[1]||'';
+      const signedIn=await one('SELECT user_id FROM sessions WHERE token=$1 AND expires>$2',[hash(sessionToken),Date.now()]);
+      if(write&&invitation.role!=='viewer')fail(400,'הקישור הזה מיועד להורה. יש להצטרף באמצעות חשבון הורה.');
+      if(signedIn&&await one('SELECT role FROM members WHERE user_id=$1 AND album_id=$2',[signedIn.user_id,invitation.album_id]))return await finish(200,write?{ok:true,album:invitation.album_id}:{joined:true,album:invitation.album_id});
+      if(invitation.used||Number(invitation.expires)<=Date.now())fail(410,'ההזמנה כבר נוצלה או שפג תוקפה. בקשו מההורים קישור חדש.');
+      if(!write)return await finish(200,{role:invitation.role,childName:invitation.child_name||invitation.name,sex:invitation.sex});
+      const user=signedIn?.user_id||id();
+      if(!signedIn)await query('INSERT INTO users(id,email,name,password) VALUES($1,NULL,$2,NULL)',[user,details.name]);
+      await query("INSERT INTO members(user_id,album_id,role) VALUES($1,$2,'viewer') ON CONFLICT(user_id,album_id) DO NOTHING",[user,invitation.album_id]);
+      await query('INSERT INTO family_profiles(user_id,album_id,name,phone,relationship) VALUES($1,$2,$3,$4,$5) ON CONFLICT(user_id,album_id) DO NOTHING',[user,invitation.album_id,details.name,details.phone,details.relationship]);
+      await query('UPDATE invites SET used=1 WHERE token=$1',[inviteHash]);
+      const maxAge=(await one('SELECT password FROM users WHERE id=$1',[user]))?.password?604800:familySessionSeconds;
+      const token=id();await query('INSERT INTO sessions VALUES($1,$2,$3)',[hash(token),user,Date.now()+maxAge*1000]);
+      await client.query('COMMIT');
+      res.setHeader('Set-Cookie',`session=${token}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=${maxAge}`);
+      return send(200,{ok:true,album:invitation.album_id});
     }
     if(write && ['/api/login','/api/register'].includes(path)) {
       const email=text(b.email,254).toLowerCase();if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) fail(400,'כתובת הדוא״ל אינה תקינה');
@@ -98,7 +125,8 @@ export default async function handler(req,res) {
     }
     if(path==='/api/comments'&&write) {
       const moment=await one('SELECT album_id FROM moments WHERE id=$1',[text(b.moment,80)]);if(!moment) fail(404,'הרגע לא נמצא');await member(user,moment.album_id);
-      const comment={id:id(),body:text(b.body,2000),created:Date.now(),author:(await one('SELECT name FROM users WHERE id=$1',[user])).name};await query('INSERT INTO comments VALUES($1,$2,$3,$4,$5)',[comment.id,b.moment,user,comment.body,comment.created]);return await finish(201,comment);
+      const details=await one('SELECT name,relationship FROM family_profiles WHERE user_id=$1 AND album_id=$2',[user,moment.album_id]);
+      const comment={id:id(),body:text(b.body,2000),created:Date.now(),author:familyAuthor(details?.name||(await one('SELECT name FROM users WHERE id=$1',[user])).name,details?.relationship)};await query('INSERT INTO comments VALUES($1,$2,$3,$4,$5)',[comment.id,b.moment,user,comment.body,comment.created]);return await finish(201,comment);
     }
     if(path==='/api/checklist') {
       const album=write?b.album:url.searchParams.get('album');await member(user,album,write);
@@ -111,7 +139,7 @@ export default async function handler(req,res) {
     if(path==='/api/moments'&&!write) {
       const album=url.searchParams.get('album');await member(user,album);
       const moments=await query('SELECT * FROM moments WHERE album_id=$1 ORDER BY date ASC,created ASC,id ASC',[album]);
-      for(const m of moments) {m.created=Number(m.created);m.files=await query('SELECT id,name,type FROM files WHERE moment_id=$1',[m.id]);m.comments=(await query('SELECT c.id,c.body,c.created,u.name AS author FROM comments c JOIN users u ON u.id=c.user_id WHERE moment_id=$1 ORDER BY c.created,c.id',[m.id])).map(c=>({...c,created:Number(c.created)}));}
+      for(const m of moments) {m.created=Number(m.created);m.files=await query('SELECT id,name,type FROM files WHERE moment_id=$1',[m.id]);m.comments=(await query('SELECT c.id,c.body,c.created,u.name AS author,f.name AS family_name,f.relationship FROM comments c JOIN users u ON u.id=c.user_id LEFT JOIN family_profiles f ON f.user_id=c.user_id AND f.album_id=$2 WHERE moment_id=$1 ORDER BY c.created,c.id',[m.id,album])).map(({family_name,relationship,...c})=>({...c,author:familyAuthor(family_name||c.author,relationship),created:Number(c.created)}));}
       return await finish(200,moments);
     }
     if(path==='/api/photo-requests'&&!write) {

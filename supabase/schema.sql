@@ -4,7 +4,7 @@ begin;
 create schema if not exists little_dreams;
 revoke all on schema little_dreams from public, anon, authenticated;
 create table if not exists little_dreams.users (
-  id text primary key, email text not null unique, name text not null, password text not null
+  id text primary key, email text unique, name text not null, password text
 );
 create table if not exists little_dreams.albums (
   id text primary key, name text not null, child_name text, birth_date text,
@@ -14,6 +14,14 @@ create table if not exists little_dreams.members (
   user_id text references little_dreams.users(id), album_id text references little_dreams.albums(id),
   role text not null check (role in ('parent','viewer')), primary key(user_id,album_id)
 );
+create table if not exists little_dreams.family_profiles (
+  user_id text not null, album_id text not null,
+  name text not null check(length(name) between 1 and 80),
+  phone text not null check(length(phone) between 9 and 16), relationship text not null,
+  primary key(user_id,album_id),
+  foreign key(user_id,album_id) references little_dreams.members(user_id,album_id) on delete cascade
+);
+alter table little_dreams.family_profiles enable row level security;
 create table if not exists little_dreams.sessions (
   token text primary key, user_id text not null references little_dreams.users(id), expires bigint not null
 );

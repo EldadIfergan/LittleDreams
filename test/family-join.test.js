@@ -1,0 +1,76 @@
+import {test} from 'node:test';
+import assert from 'node:assert/strict';
+import {spawn} from 'node:child_process';
+import {mkdtempSync,rmSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+import {once} from 'node:events';
+import {DatabaseSync} from 'node:sqlite';
+import {createHash} from 'node:crypto';
+
+test('three-field invitation signup grants only the invited album and labels comments per album',async t=>{
+  const data=mkdtempSync(join(tmpdir(),'little-dreams-family-'));
+  const server=spawn(process.execPath,['server.mjs'],{cwd:new URL('..',import.meta.url),env:{...process.env,DATA_DIR:data,PORT:'0',HOST:'127.0.0.1',BACKUP_ENABLED:'0'},stdio:['ignore','pipe','pipe']});
+  t.after(async()=>{const stopped=once(server,'exit');server.kill();await stopped;rmSync(data,{recursive:true,force:true});});
+  let logs='';server.stderr.on('data',chunk=>{logs+=chunk;});
+  const ready=await Promise.race([once(server.stdout,'data'),once(server,'exit').then(()=>{throw new Error(logs);})]);
+  const base=`http://127.0.0.1:${/port (\d+)/.exec(String(ready[0]))[1]}`;
+  async function request(path,body,cookie='') {
+    const response=await fetch(base+path,{method:body===undefined?'GET':'POST',headers:{origin:base,'content-type':'application/json',cookie},body:body===undefined?undefined:JSON.stringify(body)});
+    return {status:response.status,body:await response.json(),cookie:response.headers.get('set-cookie')?.split(';')[0],setCookie:response.headers.get('set-cookie')};
+  }
+  const profile={childName:'נועה',birthDate:'2026-01-01',sex:'girl'},credentials={name:'Parent',email:'parent@example.test',password:'test-password-123'};
+  const parent=await request('/api/register',{...profile,...credentials});assert.equal(parent.status,200);
+  const album=(await request('/api/me',undefined,parent.cookie)).body.albums[0].id;
+  const second=(await request('/api/albums',{...profile,childName:'אדם',sex:'boy'},parent.cookie)).body.id;
+  const invitation=async(albumId=album,role='viewer')=>(await request('/api/invites',{album:albumId,role},parent.cookie)).body.token;
+  const createMoment=async albumId=>(await request('/api/moments',{album:albumId,title:'רגע',date:'2026-02-01',description:'',files:[]},parent.cookie)).body.id;
+  const firstMoment=await createMoment(album),secondMoment=await createMoment(second);
+  const invite=await invitation(),details={invite,phone:'050-1234567',name:'דורית',relationship:'grandmother'};
+  assert.deepEqual((await request('/api/invites/info?token='+invite)).body,{role:'viewer',childName:'נועה',sex:'girl'});
+  assert.equal((await request('/api/family/join',{...details,phone:'123'})).status,400);
+  assert.equal((await request('/api/family/join',{...details,invite:'a'.repeat(48)})).status,400);
+  const guest=await request('/api/family/join',{...details,role:'parent',album:second});
+  assert.equal(guest.status,200);assert.equal(guest.body.album,album);
+  assert.match(guest.setCookie,/HttpOnly/);assert.match(guest.setCookie,/SameSite=Strict/);assert.match(guest.setCookie,/Max-Age=7776000/);
+  const me=(await request('/api/me',undefined,guest.cookie)).body;
+  assert.equal(me.user.email,null);assert.deepEqual(me.albums.map(a=>[a.id,a.role]),[[album,'viewer']]);
+  assert.equal((await request('/api/family/join',details)).status,410);
+  assert.equal((await request('/api/invites/info?token='+invite)).status,410);
+  assert.equal((await request('/api/family/join',details,guest.cookie)).status,200,'same session retry is safe');
+  assert.deepEqual((await request('/api/invites/info?token='+invite,undefined,guest.cookie)).body,{joined:true,album});
+  const comment=await request('/api/comments',{moment:firstMoment,body:'איזה אושר!',author:'הורה'},guest.cookie);
+  assert.equal(comment.status,201);assert.equal(comment.body.author,'סבתא דורית');
+  let timeline=(await request('/api/moments?album='+album,undefined,parent.cookie)).body;
+  assert.equal(timeline[0].comments[0].author,'סבתא דורית');assert.ok(!JSON.stringify(timeline).includes('501234567'));
+  for(const [path,payload] of [['/api/albums',profile],['/api/moments',{album}],['/api/moments/delete',{album,id:firstMoment}],['/api/invites',{album,role:'parent'}],['/api/profile',{album,...profile}]])assert.equal((await request(path,payload,guest.cookie)).status,403,path);
+  assert.equal((await request('/api/moments?album='+second,undefined,guest.cookie)).status,403);
+  const parentInvite=await invitation(second,'parent');
+  assert.equal((await request('/api/family/join',{...details,invite:parentInvite},guest.cookie)).status,400);
+  assert.equal((await request('/api/accept',{token:parentInvite},guest.cookie)).status,403);
+  const samePhone=await request('/api/family/join',{...details,invite:await invitation(second),name:'לירז',relationship:'aunt'});
+  assert.equal(samePhone.status,200);
+  assert.deepEqual((await request('/api/me',undefined,samePhone.cookie)).body.albums.map(a=>a.id),[second]);
+  assert.equal((await request('/api/moments?album='+album,undefined,samePhone.cookie)).status,403,'phone is not an account credential');
+  assert.equal((await request('/api/comments',{moment:secondMoment,body:'מקסים'},samePhone.cookie)).body.author,'דודה לירז');
+  const secondJoin=await request('/api/family/join',{...details,invite:await invitation(second),relationship:'aunt'},guest.cookie);
+  assert.equal(secondJoin.status,200);
+  assert.equal((await request('/api/comments',{moment:secondMoment,body:'עוד אלבום'},secondJoin.cookie)).body.author,'דודה דורית');
+  assert.equal((await request('/api/comments',{moment:firstMoment,body:'עדיין סבתא'},secondJoin.cookie)).body.author,'סבתא דורית');
+  const raceInvite=await invitation();
+  const race=await Promise.all([request('/api/family/join',{...details,invite:raceInvite}),request('/api/family/join',{...details,invite:raceInvite})]);
+  assert.deepEqual(race.map(r=>r.status).sort(),[200,410]);
+  const expired=await invitation(),db=new DatabaseSync(join(data,'album.sqlite'));
+  try {
+    db.prepare('UPDATE invites SET expires=0 WHERE token=?').run(createHash('sha256').update(expired).digest('hex'));
+    assert.equal((await request('/api/family/join',{...details,invite:expired})).status,410);
+    assert.equal((await request('/api/invites/info?token='+expired)).status,410);
+    const saved=db.prepare('SELECT * FROM family_profiles WHERE name=? AND album_id=?').get('דורית',album);
+    assert.equal(saved.phone,'+972501234567');
+  }finally {db.close();}
+  assert.equal((await request('/api/logout',{},secondJoin.cookie)).status,200);
+  assert.equal((await request('/api/me',undefined,secondJoin.cookie)).status,401);
+  assert.equal((await request('/api/login',credentials)).status,200,'existing parent login still works');
+  const additionalParent=await request('/api/register',{name:'Parent 2',email:'parent2@example.test',password:credentials.password,invite:parentInvite});
+  assert.equal(additionalParent.status,200);assert.equal((await request('/api/me',undefined,additionalParent.cookie)).body.albums[0].role,'parent');
+});

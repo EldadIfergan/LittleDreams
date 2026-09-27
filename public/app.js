@@ -3,6 +3,33 @@ let mode = 'register', albums = [], current;
 try {if(localStorage.getItem('little-dreams-returning')==='1')mode='login';} catch {}
 let creatingAlbum = false;
 let invite = new URLSearchParams(location.search).get('invite');
+function clearInvite() {invite=null;history.replaceState(null,'','/');}
+function familyInvitation(info,error) {
+  closeParentTools();
+  for(const name of ['auth','album','album-hub','parent-tools-page','parent-menu-button','my-albums-button','logout'])$('#'+name).hidden=true;
+  $('#family-join').hidden=false;
+  document.body.classList.remove('family-view');
+  document.documentElement.dataset.theme=info?.sex||'unspecified';
+  $('#family-title').textContent=error?'קישור ההזמנה אינו זמין':`מצטרפים לאלבום של ${info.childName}`;
+  $('#family-form').hidden=!!error;$('#family-intro').hidden=!!error;
+  $('#family-unavailable').hidden=!error;$('#family-link-error').textContent=error?.message||'';
+  $('#family-error').textContent='';
+}
+$('#family-form').addEventListener('input',()=>{
+  const name=$('#family-name').value.trim(),select=$('#family-relationship');
+  const label=['family_friend','other',''].includes(select.value)?'':select.selectedOptions[0].textContent;
+  const author=label&&!name.startsWith(label+' ')?`${label} ${name}`:name;
+  $('#family-author-preview').textContent=name&&select.value?`התגובות שלך יופיעו בשם ״${author}״`:'';
+});
+$('#family-form').onsubmit=event=>{
+  event.preventDefault();
+  busy(event.target,$('#family-error'),async()=>{
+    const result=await api('/api/family/join',{...Object.fromEntries(new FormData(event.target)),invite});
+    current={id:result.album};clearInvite();mode='login';
+    try {localStorage.setItem('little-dreams-returning','1');} catch {}
+    event.target.reset();$('#family-author-preview').textContent='';await load();
+  });
+};
 async function api(path, data) {
   const response = await fetch(path, data === undefined ? {} : {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
   const result = await response.json();
@@ -21,7 +48,8 @@ function setMode(value) {
   $('#child-registration').disabled = !register || !!invite;
   $('[name=password]').autocomplete = register ? 'new-password' : 'current-password';
   $('#invite-note').hidden = !invite;
-  $('#auth-title').textContent = register ? invite ? 'מצטרפים לאלבום המשפחתי' : 'מתחילים לאסוף זיכרונות' : 'איזה כיף שחזרתם';
+  $('#auth-title').textContent = register ? invite ? 'מצטרפים כהורה לאלבום' : 'מתחילים לאסוף זיכרונות' : 'איזה כיף שחזרתם';
+  $('#invite-note').textContent='הוזמנתם להצטרף כהורה ולנהל יחד את האלבום. אם כבר נרשמתם, בחרו ״כבר יש לי חשבון״.';
   $('#auth-submit').textContent = register ? invite ? 'הצטרפות וצפייה באלבום' : 'יצירת אלבום' : 'כניסה לאלבום';
   $('#auth-error').textContent = '';
 }
@@ -46,6 +74,14 @@ $('#auth-form').onsubmit = event => {
   });
 };
 async function load() {
+  if(invite) {
+    try {
+      const info=await api('/api/invites/info?token='+encodeURIComponent(invite));
+      if(info.joined){current={id:info.album};clearInvite();}
+      else if(info.role==='viewer'){familyInvitation(info);return;}
+    }catch(error){familyInvitation(null,error);return;}
+  }
+  $('#family-join').hidden=true;
   try {
     const result = await api('/api/me');
     mode='login';try {localStorage.setItem('little-dreams-returning','1');} catch {}
@@ -54,6 +90,7 @@ async function load() {
       catch(e) { $('#page-error').textContent = e.message; invite = null; }
     }
     albums = result.albums; current = albums.find(a => a.id === current?.id) || albums[0];
+    $('#new-album-button').hidden=!result.user.email;
     $('#auth').hidden = true; $('#album').hidden = false; $('#logout').hidden = false;
     $('#my-albums-button').hidden = albums.length<2 && current.role!=='parent';
     $('#album-hub').hidden = true;
@@ -66,24 +103,52 @@ async function load() {
   }
 }
 let albumRender=0;
-function closeParentTools() { $('#parent-tools-dialog').close(); }
-function parentToolsView(view='menu') {
-  if(current?.role!=='parent')return;
-  const titles={menu:'תפריט להורים',guide:'לגדול יחד',checklist:'אבני הדרך שלנו'};
+let parentToolsScroll=0;
+function closeSiteMenu(restoreFocus=false) {
+  const wasOpen=!$('#site-menu').hidden;
+  $('#site-menu').hidden=true;
+  $('#parent-menu-button').setAttribute('aria-expanded','false');
+  if(wasOpen&&restoreFocus)$('#parent-menu-button').focus();
+}
+function openSiteMenu() {
+  if(!current)return;
+  $('#parent-tools-menu').hidden=current.role!=='parent'||!$('#album-hub').hidden;
+  $('#site-menu').hidden=false;
+  $('#parent-menu-button').setAttribute('aria-expanded','true');
+}
+function closeParentTools() {
+  closeSiteMenu();
+  if($('#parent-tools-page').hidden)return;
+  $('#parent-tools-page').hidden=true;
+  if(current&&$('#auth').hidden&&$('#album-hub').hidden){$('#album').hidden=false;window.scrollTo({top:parentToolsScroll,behavior:'instant'});}
+}
+function parentToolsView(view) {
+  if(current?.role!=='parent'||!$('#album-hub').hidden)return;
+  const titles={guide:'לגדול יחד',checklist:'אבני הדרך שלנו'};
+  if(!titles[view])return;
+  closeSiteMenu();
+  if($('#parent-tools-page').hidden)parentToolsScroll=window.scrollY;
+  $('#album').hidden=true;
+  $('#parent-tools-page').hidden=false;
   $('#parent-tools-title').textContent=titles[view];
-  $('#parent-tools-menu').hidden=view!=='menu';
-  $('#parent-tools-back').hidden=view==='menu';
   $('#parent-guide').hidden=view!=='guide';
   $('#development-checklist').hidden=view!=='checklist';
-  if($('#parent-tools-dialog').open)(view==='menu'?$('#parent-tools-guide'):$('#parent-tools-title')).focus();
+  window.scrollTo({top:0,behavior:'instant'});
+  $('#parent-tools-title').focus({preventScroll:true});
 }
-$('#parent-menu-button').onclick=()=>{
-  if(current?.role!=='parent')return;
-  parentToolsView();$('#parent-tools-dialog').showModal();$('#parent-tools-guide').focus();
+$('#parent-menu-button').onclick=()=>$('#site-menu').hidden?openSiteMenu():closeSiteMenu();
+$('#parent-menu-button').onkeydown=event=>{
+  if(event.key!=='ArrowDown')return;
+  event.preventDefault();openSiteMenu();
+  [...$('#site-menu').querySelectorAll('button')].find(button=>button.getClientRects().length)?.focus();
 };
+document.addEventListener('pointerdown',event=>{if(!$('#header-menu').contains(event.target))closeSiteMenu();});
+document.addEventListener('focusin',event=>{if(!$('#header-menu').contains(event.target))closeSiteMenu();});
+document.addEventListener('keydown',event=>{if(event.key==='Escape'&&!$('#site-menu').hidden){event.preventDefault();closeSiteMenu(true);}});
+$('#site-menu').addEventListener('click',event=>{if(event.target.closest('button'))closeSiteMenu();});
 $('#parent-tools-guide').onclick=()=>parentToolsView('guide');
 $('#parent-tools-checklist').onclick=()=>parentToolsView('checklist');
-$('#parent-tools-back').onclick=()=>parentToolsView();
+$('#parent-tools-back').onclick=()=>{closeParentTools();$('#parent-menu-button').focus({preventScroll:true});};
 async function showAlbum() {
   const render=++albumRender,album=current.id;
   closeParentTools();
@@ -93,7 +158,7 @@ async function showAlbum() {
   document.body.classList.toggle('family-view',!parent);
   $('.child-summary').hidden=!parent;
   for (const name of ['add-button','invite-button','first-moment']) $(`#${name}`).hidden = !parent;
-  $('#album-description').textContent = parent ? 'התמונות, הסיפורים והתגובות — מסודרים לפי אירועים.' : 'גללו בין האירועים. בכל אירוע אפשר לראות תמונות ולכתוב תגובה.';
+  $('#album-description').textContent = parent ? 'הרגעים הקטנים שהופכים לסיפור שלנו.' : 'כל הרגעים, במקום אחד. גללו לצפייה בתמונות ולכתיבת תגובה למשפחה.';
   $('#moments').replaceChildren(); $('#empty').hidden = true; $('#count').textContent = 'טוענים רגעים…';
   $('#checklist-items').replaceChildren();$('#checklist-count').textContent='';$('#checklist-error').textContent='';$('#checklist-status').textContent='';
   $('#photo-review').hidden=true;$('#photo-status').textContent='';
@@ -107,7 +172,8 @@ async function showAlbum() {
   photos.renderQueue(parent?requests:[],photoContext);
   renderChecklist(items,album,parent);
   let month='';
-  $('#count').textContent = moments.length === 1 ? 'רגע אחד באלבום' : `${moments.length} רגעים באלבום`;
+  const photoCount=moments.reduce((total,moment)=>total+moment.files.filter(file=>file.type.startsWith('image/')).length,0);
+  $('#count').textContent = (moments.length === 1 ? 'רגע אחד' : `${moments.length} רגעים`)+(photoCount?' · '+(photoCount===1?'תמונה אחת':`${photoCount} תמונות`):'');
   $('#empty').hidden = !!moments.length;
   moments.forEach((moment,index) => {
     const key=moment.date.slice(0,7);
@@ -226,7 +292,6 @@ function renderChecklist(items,album,parent) {
   if(current?.id!==album)return;
   const completedCount=items.filter(i=>i.completed).length;
   $('#checklist-count').textContent=completedCount===1?'רגע אחד שסומן':completedCount+' רגעים שסומנו';
-  $('#menu-checklist-count').textContent=$('#checklist-count').textContent+' · תיעוד התפתחות ורגעים ראשונים';
   const list=$('#checklist-items');
   const opened=new Set([...list.querySelectorAll('details[open]')].map(el=>el.dataset.group));
   const firstRender=list.children.length===0;
@@ -388,7 +453,7 @@ $('#moment-form').onsubmit=async event=>{
   } catch(error) {$('#moment-error').textContent=error.name==='AbortError'?'הפעולה בוטלה. האירוע לא השתנה ואפשר לנסות שוב.':error.message;}
   finally {uploadController=null;controls.forEach(c=>c.disabled=false);$('#cancel-upload').hidden=true;progress('');}
 };
-$('#invite-button').onclick = () => { $('#invite-result').hidden = true; $('#invite-error').textContent = ''; $('#invite-result small').textContent = location.hostname === 'localhost' ? 'בסביבה המקומית הקישור פועל רק במחשב הזה.' : 'אפשר לשלוח את הקישור באופן פרטי לאדם שהזמנתם.'; $('#invite-dialog').showModal(); };
+$('#invite-button').onclick = () => { $('#invite-result').hidden = true; $('#invite-error').textContent = ''; $('#invite-result small').textContent = ['localhost','127.0.0.1'].includes(location.hostname) ? 'בסביבה המקומית הקישור פועל רק במחשב הזה.' : 'אפשר לשלוח את הקישור באופן פרטי לאדם שהזמנתם.'; $('#invite-dialog').showModal(); };
 $('#invite-form').onsubmit = event => {
   event.preventDefault(); busy(event.target,$('#invite-error'),async () => {
     const result = await api('/api/invites',{album:current.id,role:event.target.elements.role.value});
@@ -415,18 +480,19 @@ function sourceFor(stage) { return `https://me.health.gov.il/parenting/age-menu/
 function showProfile() {
   $('#child-avatar').hidden = !current.avatar;
   if (current.avatar) $('#child-avatar').src = current.avatar;
+  $('#child-initial').hidden = !!current.avatar;
+  $('#child-initial').textContent = Array.from(current.child_name || current.name || '✳')[0];
   document.documentElement.dataset.theme = current.sex || 'unspecified';
   const parent = current.role === 'parent';
   $('#edit-profile').hidden = !parent;
-  $('#parent-menu-button').hidden = !parent;
-  $('#child-heading').textContent = current.child_name || 'נכיר את הילד או הילדה?';
+  $('#parent-menu-button').hidden = false;
   const info = current.birth_date ? ageInfo(current.birth_date) : null;
   const birthLabel=current.sex==='girl'?'נולדה ב־':current.sex==='boy'?'נולד ב־':'תאריך לידה: ';
   const facts = info ? [`גיל: ${info.label}`,`${birthLabel}${new Date(current.birth_date+'T12:00:00').toLocaleDateString('he-IL')}`] : ['השלימו תאריך לידה כדי לראות הצעות לפי גיל.'];
   if (current.birth_time) facts.push(`שעת לידה: ${current.birth_time}`);
   if (current.birth_weight) facts.push(`משקל לידה: ${current.birth_weight.toLocaleString('he-IL')} גרם`);
   if (current.birth_length) facts.push(`אורך בלידה: ${current.birth_length} ס״מ`);
-  $('#child-facts').textContent = facts.join(' · ');
+  $('#child-facts').replaceChildren(...facts.map(fact=>{const span=document.createElement('span');span.textContent=fact;return span;}));
   const stage = !info || info.days < 42 || info.months >= 12 ? null : stages[info.months < 3 ? 0 : info.months < 6 ? 1 : info.months < 9 ? 2 : 3];
   $('#guide-age').textContent = stage ? `מתאים לתקופה שלכם · ${stage.label}` : !info ? 'להתאמה לפי גיל, השלימו את פרטי הילד או הילדה.' : info.days < 42 ? 'השבועות הראשונים · זמן להיכרות ולתיעוד רגעים משותפים.' : 'הספרייה הראשונית מתמקדת בשנה הראשונה. מידע לגילים נוספים זמין במקור המקושר בהמשך.';
   $('#suggestion').replaceChildren();
@@ -450,6 +516,7 @@ function showProfile() {
   const more = document.createElement('a'); more.href='https://www.cdc.gov/act-early/milestones/index.html'; more.target='_blank'; more.rel='noopener noreferrer'; more.textContent='אבני דרך לפי גיל עד גיל 5 · CDC (באנגלית) ↗'; $('#articles').append(more);
 }
 $('#edit-profile').onclick = () => {
+  closeParentTools();
   creatingAlbum = false;
   $('#profile-title').textContent = 'פרטי הילד או הילדה';
   const form = $('#profile-form');
@@ -473,7 +540,7 @@ $('#profile-form').onsubmit = event => {
 $('#my-albums-button').onclick = async () => {
   try {
     const result = await api('/api/me'); albums = result.albums;
-    closeParentTools(); $('#parent-menu-button').hidden = true;
+    closeParentTools();
     $('#album').hidden = true; $('#album-hub').hidden = false;
     document.documentElement.dataset.theme = 'unspecified';
     const list = $('#album-list'); list.replaceChildren();

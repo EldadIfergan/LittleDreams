@@ -14,7 +14,7 @@ let signedIn = true, role = 'viewer', statements = [], momentExists = true;
 pg.Pool.prototype.connect = async () => ({
   async query(sql) {
     statements.push(sql);
-    if (sql.startsWith('SELECT to_regclass')) return {rows:[{requests:'photo_requests',uploads:'photo_request_uploads'}]};
+    if (sql.startsWith('SELECT to_regclass')) return {rows:[{requests:'photo_requests',uploads:'photo_request_uploads',family:'family_profiles'}]};
     if (sql.startsWith('SELECT user_id FROM sessions')) return {rows:signedIn ? [{user_id:'user'}] : []};
     if (sql.startsWith('SELECT role FROM members')) return {rows:role ? [{role}] : []};
     if (sql.startsWith('SELECT album_id FROM moments')) return {rows:[{album_id:'album'}]};

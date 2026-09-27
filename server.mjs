@@ -2,6 +2,7 @@ import { checklist, milestoneKey } from './lib/checklist.js';
 import { planEdit } from './lib/event-edit.js';
 import { photoDetails, requestFiles, reviewDecision, approvalCapacity } from './lib/photo-requests.js';
 import { birthTime } from './lib/birth-time.js';
+import {familyDetails,familyAuthor,familySessionSeconds,inviteToken} from './lib/family.js';
 import http from 'node:http';
 import { validateAvatar } from './lib/avatar.js';
 import { DatabaseSync, backup } from 'node:sqlite';
@@ -19,6 +20,7 @@ CREATE TABLE IF NOT EXISTS albums(id TEXT PRIMARY KEY, name TEXT);
 CREATE TABLE IF NOT EXISTS members(user_id TEXT REFERENCES users(id), album_id TEXT REFERENCES albums(id), role TEXT, PRIMARY KEY(user_id,album_id));
 CREATE TABLE IF NOT EXISTS sessions(token TEXT PRIMARY KEY,user_id TEXT REFERENCES users(id),expires INTEGER);
 CREATE TABLE IF NOT EXISTS invites(token TEXT PRIMARY KEY,album_id TEXT REFERENCES albums(id),role TEXT,expires INTEGER,used INTEGER DEFAULT 0);
+CREATE TABLE IF NOT EXISTS family_profiles(user_id TEXT NOT NULL,album_id TEXT NOT NULL,name TEXT NOT NULL,phone TEXT NOT NULL,relationship TEXT NOT NULL,PRIMARY KEY(user_id,album_id),FOREIGN KEY(user_id,album_id) REFERENCES members(user_id,album_id) ON DELETE CASCADE);
 CREATE TABLE IF NOT EXISTS moments(id TEXT PRIMARY KEY,album_id TEXT REFERENCES albums(id),title TEXT,date TEXT,description TEXT,created INTEGER);
 CREATE TABLE IF NOT EXISTS checklist(album_id TEXT NOT NULL REFERENCES albums(id),key TEXT NOT NULL,completed INTEGER NOT NULL DEFAULT 0 CHECK(completed IN (0,1)),moment_id TEXT REFERENCES moments(id),PRIMARY KEY(album_id,key));
 CREATE TABLE IF NOT EXISTS files(id TEXT PRIMARY KEY,moment_id TEXT REFERENCES moments(id),name TEXT,type TEXT);
@@ -85,6 +87,7 @@ function inviteRecord(token) {
 }
 function accept(user, token) {
   const invite = inviteRecord(token);
+  if(invite.role==='parent'&&!db.prepare('SELECT password FROM users WHERE id=?').get(user)?.password)fail(403,'להצטרפות כהורה יש להיכנס לחשבון הורה עם דוא״ל וסיסמה.');
   if (db.prepare('SELECT 1 FROM members WHERE user_id=? AND album_id=?').get(user,invite.album_id)) fail(400,'כבר יש לך גישה לאלבום');
   db.prepare('INSERT INTO members VALUES(?,?,?)').run(user,invite.album_id,invite.role);
   db.prepare('UPDATE invites SET used=1 WHERE token=?').run(invite.token);
@@ -104,10 +107,42 @@ const server = http.createServer(async (req,res) => {
       if (req.headers.origin && req.headers.origin !== `http://${req.headers.host}` && req.headers.origin !== `https://${req.headers.host}`) fail(403,'מקור הבקשה אינו מורשה');
       if (!req.headers['content-type']?.startsWith('application/json')) fail(415,'נדרשת בקשת JSON');
     }
-    if (req.method === 'GET' && ['/', '/app.js', '/style.css','/favicon.svg','/media.js','/photo-requests.js','/vendor/mediabunny.mjs'].includes(path)) {
+    if (req.method === 'GET' && ['/', '/app.js', '/style.css','/favicon.svg','/media.js','/photo-requests.js','/vendor/mediabunny.mjs','/fonts/Heebo.ttf'].includes(path)) {
       const name = path === '/' ? 'index.html' : path.slice(1);
-      res.setHeader('Content-Type', {html:'text/html; charset=utf-8',js:'text/javascript; charset=utf-8',mjs:'text/javascript; charset=utf-8',css:'text/css; charset=utf-8',svg:'image/svg+xml'}[name.split('.').pop()]);
+      res.setHeader('Content-Type', {html:'text/html; charset=utf-8',js:'text/javascript; charset=utf-8',mjs:'text/javascript; charset=utf-8',css:'text/css; charset=utf-8',svg:'image/svg+xml',ttf:'font/ttf'}[name.split('.').pop()]);
       return res.end(readFileSync(join(root,'public',name)));
+    }
+    if(path==='/api/invites/info'&&req.method==='GET') {
+      const invitation=db.prepare('SELECT i.*,a.child_name,a.name,a.sex FROM invites i JOIN albums a ON a.id=i.album_id WHERE i.token=?').get(hash(inviteToken(url.searchParams.get('token'))));
+      if(!invitation)fail(400,'הקישור אינו תקף. בקשו מההורים קישור חדש.');
+      const cookie=/(?:^|;\s*)session=([a-f0-9]+)/.exec(req.headers.cookie||'')?.[1]||'';
+      const signedIn=db.prepare('SELECT user_id FROM sessions WHERE token=? AND expires>?').get(hash(cookie),Date.now());
+      if(signedIn&&db.prepare('SELECT 1 FROM members WHERE user_id=? AND album_id=?').get(signedIn.user_id,invitation.album_id))return send(res,200,{joined:true,album:invitation.album_id});
+      if(invitation.used||invitation.expires<=Date.now())fail(410,'הקישור כבר נוצל או שפג תוקפו. בקשו מההורים קישור חדש.');
+      return send(res,200,{role:invitation.role,childName:invitation.child_name||invitation.name,sex:invitation.sex});
+    }
+    if(path==='/api/family/join'&&req.method==='POST') {
+      const b=await body(req),details=familyDetails(b),invitationHash=hash(inviteToken(b.invite));
+      const cookie=/(?:^|;\s*)session=([a-f0-9]+)/.exec(req.headers.cookie||'')?.[1]||'';
+      const signedIn=db.prepare('SELECT user_id FROM sessions WHERE token=? AND expires>?').get(hash(cookie),Date.now());
+      db.exec('BEGIN');
+      let album,newToken,maxAge;
+      try {
+        const invitation=db.prepare('SELECT * FROM invites WHERE token=?').get(invitationHash);
+        if(!invitation||invitation.role!=='viewer')fail(400,'נדרש קישור להזמנת בן או בת משפחה.');
+        album=invitation.album_id;
+        if(signedIn&&db.prepare('SELECT 1 FROM members WHERE user_id=? AND album_id=?').get(signedIn.user_id,album)) {db.exec('COMMIT');return send(res,200,{ok:true,album});}
+        if(invitation.used||invitation.expires<=Date.now())fail(410,'הקישור כבר נוצל או שפג תוקפו. בקשו מההורים קישור חדש.');
+        const user=signedIn?.user_id||id();
+        if(!signedIn)db.prepare('INSERT INTO users(id,email,name,password) VALUES(?,NULL,?,NULL)').run(user,details.name);
+        db.prepare('INSERT INTO members(user_id,album_id,role) VALUES(?,?,?)').run(user,album,'viewer');
+        db.prepare('INSERT INTO family_profiles(user_id,album_id,name,phone,relationship) VALUES(?,?,?,?,?)').run(user,album,details.name,details.phone,details.relationship);
+        db.prepare('UPDATE invites SET used=1 WHERE token=?').run(invitationHash);
+        maxAge=db.prepare('SELECT password FROM users WHERE id=?').get(user).password?604800:familySessionSeconds;
+        newToken=id();db.prepare('INSERT INTO sessions VALUES(?,?,?)').run(hash(newToken),user,Date.now()+maxAge*1000);
+        db.exec('COMMIT');
+      }catch(error){db.exec('ROLLBACK');throw error;}
+      return send(res,200,{ok:true,album},{'Set-Cookie':`session=${newToken}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${maxAge}${process.env.COOKIE_SECURE==='1'?'; Secure':''}`});
     }
     if (req.method === 'POST' && ['/api/register','/api/login'].includes(path)) {
       const b = await body(req);
@@ -146,6 +181,7 @@ const server = http.createServer(async (req,res) => {
     if (!session) fail(401,'יש להתחבר כדי לצפות באלבום');
     const user = session.user_id;
     if (path === '/api/albums' && req.method === 'POST') {
+      if(!db.prepare('SELECT password FROM users WHERE id=?').get(user)?.password)fail(403,'יצירת אלבום חדש זמינה לחשבון הורה.');
       const b = await body(req); const profile = childProfile(b); const name = profile[0]; const album = id();
       db.exec('BEGIN');
       try {
@@ -164,6 +200,8 @@ const server = http.createServer(async (req,res) => {
       const comment = {id:id(),body:text(b.body,2000,'התגובה (עד 2,000 תווים)'),created:Date.now()};
       db.prepare('INSERT INTO comments VALUES(?,?,?,?,?)').run(comment.id,momentId,user,comment.body,comment.created);
       comment.author = db.prepare('SELECT name FROM users WHERE id=?').get(user).name;
+      const details=db.prepare('SELECT name,relationship FROM family_profiles WHERE user_id=? AND album_id=?').get(user,moment.album_id);
+      comment.author=familyAuthor(details?.name||comment.author,details?.relationship);
       return send(res,201,comment);
     }
     if (path === '/api/profile' && req.method === 'POST') {
@@ -198,7 +236,7 @@ const server = http.createServer(async (req,res) => {
       const moments = db.prepare('SELECT * FROM moments WHERE album_id=? ORDER BY date ASC,created ASC,id ASC').all(album);
       for (const moment of moments) {
         moment.files = db.prepare('SELECT id,name,type FROM files WHERE moment_id=?').all(moment.id);
-        moment.comments = db.prepare('SELECT c.id,c.body,c.created,u.name AS author FROM comments c JOIN users u ON u.id=c.user_id WHERE c.moment_id=? ORDER BY c.created,c.rowid').all(moment.id);
+        moment.comments = db.prepare('SELECT c.id,c.body,c.created,u.name AS author,f.name AS family_name,f.relationship FROM comments c JOIN users u ON u.id=c.user_id LEFT JOIN family_profiles f ON f.user_id=c.user_id AND f.album_id=? WHERE c.moment_id=? ORDER BY c.created,c.rowid').all(album,moment.id).map(({family_name,relationship,...comment})=>({...comment,author:familyAuthor(family_name||comment.author,relationship)}));
       }
       return send(res,200,moments);
     }
