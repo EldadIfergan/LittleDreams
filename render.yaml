@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: little-dreams
+    runtime: docker
+    plan: starter
+    region: frankfurt
+    healthCheckPath: /healthz
+    autoDeployTrigger: off
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: HOST
+        value: 0.0.0.0
+      - key: COOKIE_SECURE
+        value: '1'
+      - key: DATA_DIR
+        value: /var/data
+      - key: BACKUP_ENABLED
+        value: '1'
+    disk:
+      name: little-dreams-data
+      mountPath: /var/data
+      sizeGB: 5
