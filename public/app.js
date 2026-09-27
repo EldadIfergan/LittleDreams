@@ -59,18 +59,26 @@ async function load() {
     else $('#page-error').textContent = e.message;
   }
 }
+let albumRender=0;
 async function showAlbum() {
+  const render=++albumRender,album=current.id;
   showProfile();
   $('#album-name').textContent = current.name;
   const parent = current.role === 'parent';
   for (const name of ['add-button','invite-button','first-moment']) $(`#${name}`).hidden = !parent;
   $('#album-description').textContent = parent ? 'המקומות, הפעמים הראשונות, וכל מה שביניהם.' : 'מוזמנים לצפות ברגעים המשפחתיים ולהוסיף תגובות';
   $('#moments').replaceChildren(); $('#empty').hidden = true; $('#count').textContent = 'טוענים רגעים…';
-  const moments = await api(`/api/moments?album=${current.id}`);
+  $('#checklist-items').replaceChildren();$('#checklist-count').textContent='';$('#checklist-error').textContent='';$('#checklist-status').textContent='';
+  const [moments,items] = await Promise.all([api('/api/moments?album='+album),api('/api/checklist?album='+album)]);
+  if(render!==albumRender || current?.id!==album)return;
+  renderChecklist(items,album,parent);
+  let month='';
   $('#count').textContent = moments.length === 1 ? 'רגע אחד באלבום' : `${moments.length} רגעים באלבום`;
   $('#empty').hidden = !!moments.length;
   moments.forEach(moment => {
-    const card = document.createElement('article'); card.className = 'card';
+    const key=moment.date.slice(0,7);
+    if(key!==month) {const heading=document.createElement('h3');heading.className='timeline-month';heading.textContent=new Date(moment.date+'T12:00:00').toLocaleDateString('he-IL',{month:'long',year:'numeric'});$('#moments').append(heading);month=key;}
+    const card = document.createElement('article'); card.className = 'card';card.id='moment-'+moment.id;
     const content = document.createElement('div'); content.className = 'card-content';
     const date = document.createElement('time'); date.dateTime = moment.date;
     date.textContent = new Date(moment.date + 'T12:00:00').toLocaleDateString('he-IL',{day:'numeric',month:'long',year:'numeric'});
@@ -97,8 +105,36 @@ async function showAlbum() {
     });
     if (moment.description || moment.files.length) content.append(details);
     content.append(commentSection(moment));
-    card.append(content); $('#moments').append(card);
+    card.append(content);const item=document.createElement('div');item.className='timeline-item';item.append(card);$('#moments').append(item);
   });
+}
+function renderChecklist(items,album,parent) {
+  if(current?.id!==album)return;
+  $('#checklist-count').textContent=items.filter(i=>i.completed).length+' מתוך '+items.length;
+  const list=$('#checklist-items');list.replaceChildren();
+  for(const item of items) {
+    const row=document.createElement('div');row.className='checklist-row';
+    const label=document.createElement('label'),input=document.createElement('input');input.type='checkbox';input.checked=item.completed;input.disabled=!parent;
+    const name=document.createElement('span');name.textContent=item.title;label.append(input,name);row.append(label);
+    const action=document.createElement('button');action.type='button';action.className='quiet';
+    if(item.momentId) {action.textContent='לצפייה ברגע';action.onclick=()=>{const card=document.getElementById('moment-'+item.momentId);card?.scrollIntoView({behavior:'smooth',block:'center'});card?.setAttribute('tabindex','-1');card?.focus({preventScroll:true});};row.append(action);}
+    else if(item.completed&&parent) {action.textContent='תיעוד רגע';action.onclick=()=>openMoment(null,item);row.append(action);}
+    input.onchange=async()=>{
+      const completed=input.checked;input.disabled=true;$('#checklist-error').textContent='';
+      try {
+        const updated=await api('/api/checklist',{album,key:item.key,completed});
+        if(current?.id!==album)return;
+        renderChecklist(updated,album,parent);$('#checklist-status').textContent=completed?'אבן הדרך סומנה ונשמרה':'הסימון הוסר. אירוע שכבר תועד נשאר באלבום.';
+        const saved=updated.find(i=>i.key===item.key);
+        if(completed&&!saved.momentId) {
+          $('#milestone-saved').textContent=item.title+' — הסימון נשמר באלבום של '+current.child_name+'.';
+          $('#milestone-create').onclick=()=>{$('#milestone-dialog').close();if(current?.id===album)openMoment(null,item);};
+          $('#milestone-dialog').showModal();
+        }
+      }catch(error){input.checked=!completed;input.disabled=false;if(current?.id===album)$('#checklist-error').textContent=error.message;}
+    };
+    list.append(row);
+  }
 }
 function commentSection(moment) {
   const section = document.createElement('details'); section.className = 'comments';
@@ -136,15 +172,16 @@ function commentSection(moment) {
 }
 $('#album-picker').onchange = async event => { current = albums.find(a => a.id === event.target.value); try { await showAlbum(); } catch(e) { $('#page-error').textContent = e.message; } };
 $('#logout').onclick = async () => { try { await api('/api/logout',{}); current = null; await load(); } catch(e) { $('#page-error').textContent = e.message; } };
-let editingMoment=null, selectedFiles=[], removedFiles=new Set(), uploadController=null;
+let selectedMilestone=null, editingMoment=null, selectedFiles=[], removedFiles=new Set(), uploadController=null;
 const preparedFiles=new WeakMap(), uploadedFiles=new WeakMap();
-function openMoment(moment=null) {
+function openMoment(moment=null,milestone=null) {
+  selectedMilestone=milestone;
   editingMoment=moment?.id ? moment : null; selectedFiles=[];removedFiles=new Set();
   $('#moment-form').reset(); $('#moment-error').textContent='';$('#upload-progress').textContent='';
   $('#moment-title').textContent=editingMoment?'עריכת האירוע':'רגע קטן, זיכרון גדול';
   const now=new Date();now.setMinutes(now.getMinutes()-now.getTimezoneOffset());
   const form=$('#moment-form');form.elements.date.value=editingMoment?.date || now.toISOString().slice(0,10);
-  form.elements.title.value=editingMoment?.title || '';form.elements.description.value=editingMoment?.description || '';
+  form.elements.title.value=editingMoment?.title || milestone?.title || '';form.elements.description.value=editingMoment?.description || '';
   renderFileList();$('#moment-dialog').showModal();
 }
 function renderFileList() {
@@ -171,7 +208,7 @@ $('#moment-form [name=files]').onchange=event=>{selectedFiles.push(...event.targ
 const base64=file=>new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result.split(',')[1]);reader.onerror=()=>reject(new Error('לא ניתן לקרוא את הקובץ'));reader.readAsDataURL(file);});
 $('#moment-form').onsubmit=async event=>{
   event.preventDefault();if(uploadController)return;
-  const element=event.target,form=new FormData(element),album=current.id,moment=editingMoment;
+  const element=event.target,form=new FormData(element),album=current.id,moment=editingMoment,milestone=selectedMilestone;
   const kept=(moment?.files || []).filter(f=>!removedFiles.has(f.id)).map(f=>f.id);
   const controller=new AbortController();uploadController=controller;
   const controls=[...element.querySelectorAll('input,textarea,button')];controls.forEach(c=>c.disabled=true);
@@ -205,7 +242,7 @@ $('#moment-form').onsubmit=async event=>{
     }
     if(controller.signal.aborted)throw new DOMException('הפעולה בוטלה','AbortError');
     progress('שומרים את האירוע…');$('#cancel-upload').disabled=true;
-    await api('/api/moments',{album,title:form.get('title'),date:form.get('date'),description:form.get('description'),files:attachments,...(moment?{id:moment.id,keepFiles:kept,original:{title:moment.title,date:moment.date,description:moment.description,files:moment.files.map(f=>f.id)}}:{})});
+    await api('/api/moments',{album,title:form.get('title'),date:form.get('date'),description:form.get('description'),files:attachments,...(milestone?{milestoneKey:milestone.key}:{}),...(moment?{id:moment.id,keepFiles:kept,original:{title:moment.title,date:moment.date,description:moment.description,files:moment.files.map(f=>f.id)}}:{})});
     files.forEach(file=>uploadedFiles.delete(file));$('#moment-dialog').close();await showAlbum();
   } catch(error) {$('#moment-error').textContent=error.name==='AbortError'?'הפעולה בוטלה. האירוע לא השתנה ואפשר לנסות שוב.':error.message;}
   finally {uploadController=null;controls.forEach(c=>c.disabled=false);$('#cancel-upload').hidden=true;progress('');}

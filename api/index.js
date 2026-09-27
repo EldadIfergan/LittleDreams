@@ -1,3 +1,4 @@
+import { checklist, milestoneKey } from '../lib/checklist.js';
 import { birthTime } from '../lib/birth-time.js';
 import pg from 'pg';
 import { planEdit } from '../lib/event-edit.js';
@@ -95,9 +96,17 @@ export default async function handler(req,res) {
       const moment=await one('SELECT album_id FROM moments WHERE id=$1',[text(b.moment,80)]);if(!moment) fail(404,'הרגע לא נמצא');await member(user,moment.album_id);
       const comment={id:id(),body:text(b.body,2000),created:Date.now(),author:(await one('SELECT name FROM users WHERE id=$1',[user])).name};await query('INSERT INTO comments VALUES($1,$2,$3,$4,$5)',[comment.id,b.moment,user,comment.body,comment.created]);return await finish(201,comment);
     }
+    if(path==='/api/checklist') {
+      const album=write?b.album:url.searchParams.get('album');await member(user,album,write);
+      if(write) {
+        milestoneKey(b.key);if(typeof b.completed!=='boolean') fail(400,'סימון לא תקין');
+        await query('INSERT INTO checklist(album_id,key,completed) VALUES($1,$2,$3) ON CONFLICT(album_id,key) DO UPDATE SET completed=excluded.completed',[album,b.key,Number(b.completed)]);
+      }
+      return await finish(200,checklist(await query('SELECT * FROM checklist WHERE album_id=$1',[album])));
+    }
     if(path==='/api/moments'&&!write) {
       const album=url.searchParams.get('album');await member(user,album);
-      const moments=await query('SELECT * FROM moments WHERE album_id=$1 ORDER BY date DESC,created DESC',[album]);
+      const moments=await query('SELECT * FROM moments WHERE album_id=$1 ORDER BY date ASC,created ASC,id ASC',[album]);
       for(const m of moments) {m.created=Number(m.created);m.files=await query('SELECT id,name,type FROM files WHERE moment_id=$1',[m.id]);m.comments=(await query('SELECT c.id,c.body,c.created,u.name AS author FROM comments c JOIN users u ON u.id=c.user_id WHERE moment_id=$1 ORDER BY c.created,c.id',[m.id])).map(c=>({...c,created:Number(c.created)}));}
       return await finish(200,moments);
     }
@@ -114,6 +123,12 @@ export default async function handler(req,res) {
       if(typeof b.date!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(b.date)||!Number.isFinite(Date.parse(b.date))||new Date(b.date).toISOString().slice(0,10)!==b.date) fail(400,'תאריך האירוע אינו תקין');
       if(typeof b.description!=='string'||b.description.length>5000||!Array.isArray(b.files)||b.files.length>10||b.files.some(f=>!f||typeof f.id!=='string')||new Set(b.files.map(f=>f.id)).size!==b.files.length) fail(400,'פרטי הרגע אינם תקינים');
       const moment=b.id ? text(b.id,80) : id();const files=[];let total=0;
+      if(b.milestoneKey!==undefined) {
+        milestoneKey(b.milestoneKey);if(b.id) fail(400,'אפשר לקשר אבן דרך רק לאירוע חדש');
+        await query('INSERT INTO checklist(album_id,key,completed) VALUES($1,$2,1) ON CONFLICT(album_id,key) DO NOTHING',[b.album,b.milestoneKey]);
+        const item=await one('SELECT * FROM checklist WHERE album_id=$1 AND key=$2 FOR UPDATE',[b.album,b.milestoneKey]);
+        if(item.moment_id) fail(409,'לאבן הדרך כבר יש אירוע. רעננו את האלבום כדי לצפות בו');
+      }
       let edit;
       if (b.id) {
         const existing=await one('SELECT * FROM moments WHERE id=$1 FOR UPDATE',[moment]);
@@ -134,6 +149,7 @@ export default async function handler(req,res) {
         await query('UPDATE moments SET title=$1,date=$2,description=$3 WHERE id=$4',[title,b.date,b.description.trim(),moment]);
         for(const f of edit.removed) await query('DELETE FROM files WHERE id=$1 AND moment_id=$2',[f.id,moment]);
       } else await query('INSERT INTO moments VALUES($1,$2,$3,$4,$5,$6)',[moment,b.album,title,b.date,b.description.trim(),Date.now()]);
+      if(b.milestoneKey!==undefined) await query('UPDATE checklist SET completed=1,moment_id=$1 WHERE album_id=$2 AND key=$3',[moment,b.album,b.milestoneKey]);
       for(const f of files){await query('INSERT INTO files VALUES($1,$2,$3,$4)',[f.id,moment,f.name,f.type]);await query('DELETE FROM pending_uploads WHERE id=$1',[f.id]);}
       await client.query('COMMIT');
       // Remove objects only after the event update has committed. Never delete retained files.

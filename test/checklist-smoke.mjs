@@ -1,0 +1,41 @@
+import assert from 'node:assert/strict';
+import {randomBytes} from 'node:crypto';
+if(!process.env.SMOKE_BASE){console.log('Checklist integration skipped: set SMOKE_BASE.');process.exit(0);}
+const base=process.env.SMOKE_BASE,suffix=randomBytes(8).toString('hex'),password=randomBytes(20).toString('hex');
+async function call(path,body,cookie='') {
+ const r=await fetch(base+path,{method:body===undefined?'GET':'POST',headers:{origin:base,'content-type':'application/json',cookie},body:body===undefined?undefined:JSON.stringify(body)});
+ return {status:r.status,value:await r.json(),cookie:r.headers.get('set-cookie')?.split(';')[0]};
+}
+const profile={albumName:'Checklist test',childName:'Test',birthDate:'2026-01-01',sex:'unspecified'};
+const parent=await call('/api/register',{...profile,name:'Test',email:`check-${suffix}@example.test`,password});assert.equal(parent.status,200);
+const cookie=parent.cookie,album=(await call('/api/me',undefined,cookie)).value.albums[0].id;
+const second=(await call('/api/albums',profile,cookie)).value.id;
+const read=async(id=album,c=cookie)=>call('/api/checklist?album='+id,undefined,c);
+assert.equal((await read()).value.every(i=>!i.completed),true);
+assert.equal((await call('/api/checklist',{album,key:'smile',completed:true},cookie)).status,200);
+assert.equal((await read()).value.find(i=>i.key==='smile').completed,true);
+assert.equal((await read(second)).value.find(i=>i.key==='smile').completed,false);
+assert.equal((await call('/api/moments?album='+album,undefined,cookie)).value.length,0);
+assert.equal((await call('/api/checklist',{album,key:'fake',completed:true},cookie)).status,400);
+assert.equal((await call('/api/checklist',{album,key:'smile',completed:'yes'},cookie)).status,400);
+const invitation=await call('/api/invites',{album,role:'viewer'},cookie);
+const viewer=await call('/api/register',{name:'Viewer',email:`check-view-${suffix}@example.test`,password,invite:invitation.value.token});assert.equal(viewer.status,200);
+assert.equal((await read(album,viewer.cookie)).status,200);
+assert.equal((await read(second,viewer.cookie)).status,403);
+assert.equal((await call('/api/checklist',{album,key:'smile',completed:false},viewer.cookie)).status,403);
+const later=await call('/api/moments',{album,title:'Later',date:'2026-09-01',description:'',files:[]},cookie);assert.equal(later.status,201);
+const payload={album,title:'Smile',date:'2026-03-01',description:'',files:[],milestoneKey:'smile'};
+const concurrent=await Promise.all([call('/api/moments',payload,cookie),call('/api/moments',payload,cookie)]);
+assert.deepEqual(concurrent.map(r=>r.status).sort(),[201,409]);
+const linked=concurrent.find(r=>r.status===201).value.id;
+assert.equal((await read()).value.find(i=>i.key==='smile').momentId,linked);
+assert.deepEqual((await call('/api/moments?album='+album,undefined,cookie)).value.map(m=>m.title),['Smile','Later']);
+await call('/api/checklist',{album,key:'smile',completed:false},cookie);
+let item=(await read()).value.find(i=>i.key==='smile');assert.equal(item.completed,false);assert.equal(item.momentId,linked);
+await call('/api/checklist',{album,key:'smile',completed:true},cookie);
+assert.equal((await call('/api/moments',payload,cookie)).status,409);
+await call('/api/logout',{},cookie);
+const login=await call('/api/login',{email:`check-${suffix}@example.test`,password});assert.equal(login.status,200);
+assert.equal((await read(album,login.cookie)).value.find(i=>i.key==='smile').momentId,linked);
+await call('/api/logout',{},login.cookie);await call('/api/logout',{},viewer.cookie);
+console.log('PASS checklist persistence, optional events, chronological backdates, album isolation, viewer permissions, concurrent duplicate protection.');

@@ -61,3 +61,14 @@ insert into storage.buckets(id,name,public,file_size_limit,allowed_mime_types)
 values('little-dreams','little-dreams',false,52428800,
   array['image/jpeg','image/png','image/webp','image/gif','video/mp4','video/webm','application/pdf'])
 on conflict(id) do nothing;
+
+begin;
+create table if not exists little_dreams.checklist (
+  album_id text not null references little_dreams.albums(id),
+  key text not null, completed integer not null default 0 check(completed in (0,1)),
+  moment_id text references little_dreams.moments(id),
+  primary key(album_id,key)
+);
+alter table little_dreams.checklist enable row level security;
+revoke all on little_dreams.checklist from public,anon,authenticated;
+commit;

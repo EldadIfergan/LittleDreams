@@ -1,3 +1,4 @@
+import { checklist, milestoneKey } from './lib/checklist.js';
 import { planEdit } from './lib/event-edit.js';
 import { birthTime } from './lib/birth-time.js';
 import http from 'node:http';
@@ -18,6 +19,7 @@ CREATE TABLE IF NOT EXISTS members(user_id TEXT REFERENCES users(id), album_id T
 CREATE TABLE IF NOT EXISTS sessions(token TEXT PRIMARY KEY,user_id TEXT REFERENCES users(id),expires INTEGER);
 CREATE TABLE IF NOT EXISTS invites(token TEXT PRIMARY KEY,album_id TEXT REFERENCES albums(id),role TEXT,expires INTEGER,used INTEGER DEFAULT 0);
 CREATE TABLE IF NOT EXISTS moments(id TEXT PRIMARY KEY,album_id TEXT REFERENCES albums(id),title TEXT,date TEXT,description TEXT,created INTEGER);
+CREATE TABLE IF NOT EXISTS checklist(album_id TEXT NOT NULL REFERENCES albums(id),key TEXT NOT NULL,completed INTEGER NOT NULL DEFAULT 0 CHECK(completed IN (0,1)),moment_id TEXT REFERENCES moments(id),PRIMARY KEY(album_id,key));
 CREATE TABLE IF NOT EXISTS files(id TEXT PRIMARY KEY,moment_id TEXT REFERENCES moments(id),name TEXT,type TEXT);
 CREATE TABLE IF NOT EXISTS comments(id TEXT PRIMARY KEY,moment_id TEXT NOT NULL REFERENCES moments(id),user_id TEXT NOT NULL REFERENCES users(id),body TEXT NOT NULL,created INTEGER NOT NULL);
 CREATE INDEX IF NOT EXISTS comments_moment ON comments(moment_id,created);
@@ -180,9 +182,18 @@ const server = http.createServer(async (req,res) => {
       const invite = id(); db.prepare('INSERT INTO invites(token,album_id,role,expires) VALUES(?,?,?,?)').run(hash(invite),b.album,b.role,Date.now()+172800000);
       return send(res,201,{token:invite});
     }
+    if (path === '/api/checklist') {
+      const b=req.method==='POST'?await body(req):null;
+      const album=b?b.album:url.searchParams.get('album');
+      if(b) {
+        editor(user,album);milestoneKey(b.key);if(typeof b.completed!=='boolean') fail(400,'סימון לא תקין');
+        db.prepare('INSERT INTO checklist(album_id,key,completed) VALUES(?,?,?) ON CONFLICT(album_id,key) DO UPDATE SET completed=excluded.completed').run(album,b.key,Number(b.completed));
+      } else membership(user,album);
+      return send(res,200,checklist(db.prepare('SELECT * FROM checklist WHERE album_id=?').all(album)));
+    }
     if (path === '/api/moments' && req.method === 'GET') {
       const album = url.searchParams.get('album'); membership(user,album);
-      const moments = db.prepare('SELECT * FROM moments WHERE album_id=? ORDER BY date DESC,created DESC').all(album);
+      const moments = db.prepare('SELECT * FROM moments WHERE album_id=? ORDER BY date ASC,created ASC,id ASC').all(album);
       for (const moment of moments) {
         moment.files = db.prepare('SELECT id,name,type FROM files WHERE moment_id=?').all(moment.id);
         moment.comments = db.prepare('SELECT c.id,c.body,c.created,u.name AS author FROM comments c JOIN users u ON u.id=c.user_id WHERE c.moment_id=? ORDER BY c.created,c.rowid').all(moment.id);
@@ -197,6 +208,10 @@ const server = http.createServer(async (req,res) => {
       if (!Array.isArray(b.files) || b.files.length > 10) fail(400,'אפשר לצרף עד 10 קבצים');
       let total = 0;
       const moment=b.id ? text(b.id,80,'מזהה האירוע') : id();
+      if(b.milestoneKey!==undefined) {
+        milestoneKey(b.milestoneKey);if(b.id) fail(400,'אפשר לקשר אבן דרך רק לאירוע חדש');
+        if(db.prepare('SELECT moment_id FROM checklist WHERE album_id=? AND key=?').get(b.album,b.milestoneKey)?.moment_id) fail(409,'לאבן הדרך כבר יש אירוע. רעננו את האלבום כדי לצפות בו');
+      }
       const edit=b.id ? planEdit(b,db.prepare('SELECT * FROM moments WHERE id=?').get(moment),db.prepare('SELECT id,name,type FROM files WHERE moment_id=?').all(moment)) : null;
       if(edit) {if(edit.kept.length+b.files.length>10)fail(400,'אפשר לשמור עד 10 קבצים באירוע');total=edit.kept.reduce((sum,f)=>sum+statSync(join(data,'uploads',f.id)).size,0);}
       const files = b.files.map(f => {
@@ -211,6 +226,7 @@ const server = http.createServer(async (req,res) => {
           db.prepare('UPDATE moments SET title=?,date=?,description=? WHERE id=?').run(title,b.date,b.description.trim(),moment);
           for(const f of edit.removed) db.prepare('DELETE FROM files WHERE id=? AND moment_id=?').run(f.id,moment);
         } else db.prepare('INSERT INTO moments VALUES(?,?,?,?,?,?)').run(moment,b.album,title,b.date,b.description.trim(),Date.now());
+        if(b.milestoneKey!==undefined) db.prepare('INSERT INTO checklist(album_id,key,completed,moment_id) VALUES(?,?,1,?) ON CONFLICT(album_id,key) DO UPDATE SET completed=1,moment_id=excluded.moment_id').run(b.album,b.milestoneKey,moment);
         for (const f of files) { writeFileSync(join(data,'uploads',f.id),f.bytes); db.prepare('INSERT INTO files VALUES(?,?,?,?)').run(f.id,moment,f.name,f.type); }
         db.exec('COMMIT');
       } catch(e) { db.exec('ROLLBACK'); throw e; }
