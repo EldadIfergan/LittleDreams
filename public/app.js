@@ -61,18 +61,36 @@ async function load() {
     $('#album-picker-label').hidden = albums.length < 2;
     await showAlbum();
   } catch(e) {
-    if (e.status === 401) { document.documentElement.dataset.theme = 'unspecified';document.body.classList.remove('family-view');$('#auth').hidden = false; $('#album').hidden = true; $('#album-hub').hidden = true; $('#my-albums-button').hidden = true; $('#logout').hidden = true; setMode(mode); }
+    if (e.status === 401) { closeParentTools();document.documentElement.dataset.theme = 'unspecified';document.body.classList.remove('family-view');$('#auth').hidden = false; $('#album').hidden = true; $('#album-hub').hidden = true; $('#my-albums-button').hidden = true; $('#logout').hidden = true; setMode(mode); }
     else $('#page-error').textContent = e.message;
   }
 }
 let albumRender=0;
+function closeParentTools() { $('#parent-tools-dialog').close(); }
+function parentToolsView(view='menu') {
+  if(current?.role!=='parent')return;
+  const titles={menu:'תפריט להורים',guide:'לגדול יחד',checklist:'אבני הדרך שלנו'};
+  $('#parent-tools-title').textContent=titles[view];
+  $('#parent-tools-menu').hidden=view!=='menu';
+  $('#parent-tools-back').hidden=view==='menu';
+  $('#parent-guide').hidden=view!=='guide';
+  $('#development-checklist').hidden=view!=='checklist';
+  if($('#parent-tools-dialog').open)(view==='menu'?$('#parent-tools-guide'):$('#parent-tools-title')).focus();
+}
+$('#parent-menu-button').onclick=()=>{
+  if(current?.role!=='parent')return;
+  parentToolsView();$('#parent-tools-dialog').showModal();$('#parent-tools-guide').focus();
+};
+$('#parent-tools-guide').onclick=()=>parentToolsView('guide');
+$('#parent-tools-checklist').onclick=()=>parentToolsView('checklist');
+$('#parent-tools-back').onclick=()=>parentToolsView();
 async function showAlbum() {
   const render=++albumRender,album=current.id;
+  closeParentTools();
   showProfile();
   $('#album-name').textContent = current.child_name || current.name;
   const parent = current.role === 'parent';
   document.body.classList.toggle('family-view',!parent);
-  $('#development-checklist').hidden=!parent;
   $('.child-summary').hidden=!parent;
   for (const name of ['add-button','invite-button','first-moment']) $(`#${name}`).hidden = !parent;
   $('#album-description').textContent = parent ? 'התמונות, הסיפורים והתגובות — מסודרים לפי אירועים.' : 'גללו בין האירועים. בכל אירוע אפשר לראות תמונות ולכתוב תגובה.';
@@ -208,6 +226,7 @@ function renderChecklist(items,album,parent) {
   if(current?.id!==album)return;
   const completedCount=items.filter(i=>i.completed).length;
   $('#checklist-count').textContent=completedCount===1?'רגע אחד שסומן':completedCount+' רגעים שסומנו';
+  $('#menu-checklist-count').textContent=$('#checklist-count').textContent+' · תיעוד התפתחות ורגעים ראשונים';
   const list=$('#checklist-items');
   const opened=new Set([...list.querySelectorAll('details[open]')].map(el=>el.dataset.group));
   const firstRender=list.children.length===0;
@@ -228,7 +247,7 @@ function renderChecklist(items,album,parent) {
     const label=document.createElement('label'),input=document.createElement('input');input.type='checkbox';input.checked=item.completed;input.disabled=!parent;
     const name=document.createElement('span');name.textContent=item.title;label.append(input,name);row.append(label);
     const action=document.createElement('button');action.type='button';action.className='quiet';
-    if(item.momentId) {action.textContent='לצפייה ברגע';action.onclick=()=>{const card=document.getElementById('moment-'+item.momentId);card?.scrollIntoView({behavior:'smooth',block:'center'});card?.setAttribute('tabindex','-1');card?.focus({preventScroll:true});};row.append(action);}
+    if(item.momentId) {action.textContent='לצפייה ברגע';action.onclick=()=>{closeParentTools();const card=document.getElementById('moment-'+item.momentId);card?.scrollIntoView({behavior:'smooth',block:'center'});card?.setAttribute('tabindex','-1');card?.focus({preventScroll:true});};row.append(action);}
     else if(item.completed&&parent) {action.textContent='תיעוד רגע';action.onclick=()=>openMoment(null,item);row.append(action);}
     input.onchange=async()=>{
       const completed=input.checked;const controls=[...list.querySelectorAll('input,button')];controls.forEach(control=>control.disabled=true);$('#checklist-error').textContent='';
@@ -285,6 +304,7 @@ $('#logout').onclick = async () => { try { await api('/api/logout',{}); current 
 let selectedMilestone=null, editingMoment=null, selectedFiles=[], removedFiles=new Set(), uploadController=null;
 const preparedFiles=new WeakMap(), uploadedFiles=new WeakMap();
 function openMoment(moment=null,milestone=null) {
+  closeParentTools();
   selectedMilestone=milestone;
   editingMoment=moment?.id ? moment : null; selectedFiles=[];removedFiles=new Set();
   $('#moment-form').reset(); $('#file-selection-status').textContent=''; $('#moment-error').textContent='';$('#upload-progress').textContent='';
@@ -398,10 +418,11 @@ function showProfile() {
   document.documentElement.dataset.theme = current.sex || 'unspecified';
   const parent = current.role === 'parent';
   $('#edit-profile').hidden = !parent;
-  $('#parent-guide').hidden = !parent;
+  $('#parent-menu-button').hidden = !parent;
   $('#child-heading').textContent = current.child_name || 'נכיר את הילד או הילדה?';
   const info = current.birth_date ? ageInfo(current.birth_date) : null;
-  const facts = info ? [`גיל: ${info.label}`,`נולד/ה ב־${new Date(current.birth_date+'T12:00:00').toLocaleDateString('he-IL')}`] : ['השלימו תאריך לידה כדי לראות הצעות לפי גיל.'];
+  const birthLabel=current.sex==='girl'?'נולדה ב־':current.sex==='boy'?'נולד ב־':'תאריך לידה: ';
+  const facts = info ? [`גיל: ${info.label}`,`${birthLabel}${new Date(current.birth_date+'T12:00:00').toLocaleDateString('he-IL')}`] : ['השלימו תאריך לידה כדי לראות הצעות לפי גיל.'];
   if (current.birth_time) facts.push(`שעת לידה: ${current.birth_time}`);
   if (current.birth_weight) facts.push(`משקל לידה: ${current.birth_weight.toLocaleString('he-IL')} גרם`);
   if (current.birth_length) facts.push(`אורך בלידה: ${current.birth_length} ס״מ`);

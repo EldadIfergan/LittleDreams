@@ -72,6 +72,21 @@ main{padding-top:24px;padding-bottom:40px}
 #album .album-heading h1{font-size:32px;margin-bottom:4px;font-weight:600}
 #album .album-heading .eyebrow{margin-bottom:4px}
 #album .album-heading p{font-size:1rem;line-height:1.5}
+.album-title-row{display:flex;align-items:center;justify-content:space-between;gap:16px}
+.album-title-row h1{min-width:0;overflow-wrap:anywhere}
+#parent-menu-button{flex-shrink:0;min-height:44px;padding:8px 14px;font-size:1rem}
+#parent-tools-dialog{width:min(720px,calc(100% - 24px))}
+#parent-tools-dialog .dialog-heading{align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:16px}
+#parent-tools-dialog .tools-close{width:auto;height:auto;min-height:44px;flex-shrink:0;padding:8px 14px;font-size:1rem}
+#parent-tools-menu{display:grid;gap:12px}
+#parent-tools-menu button{text-align:start;white-space:normal;border-radius:14px;padding:16px;font-size:1.1rem}
+#parent-tools-menu strong{display:block;font-weight:600}
+#parent-tools-menu small{font-size:1rem;color:var(--muted)}
+#parent-tools-back{padding:8px 0;margin-bottom:12px;min-height:44px;font-size:1rem;color:var(--green)}
+#parent-tools-dialog .guide-inner{padding:0}
+#parent-tools-dialog .tools-count{margin:0 0 8px;font-weight:600;color:var(--green)}
+#parent-tools-dialog .checklist-row{gap:12px}
+@media(max-width:900px){#album .album-heading>div:first-child{width:100%}}
 #album .child-summary{padding:14px 0;gap:12px;flex-direction:row;flex-wrap:wrap;align-items:center}
 #album .child-avatar{width:56px;height:56px}
 #album .child-summary>div{flex:1;min-width:160px}
