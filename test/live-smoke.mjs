@@ -10,12 +10,13 @@ async function call(path,body,cookie='') {
  const value=r.status===302?null:await r.json();
  return {status:r.status,value,cookie:r.headers.get('set-cookie')?.split(';')[0],location:r.headers.get('location')};
 }
-const details={albumName:'בדיקת מערכת פרטית',childName:'בדיקה',birthDate:'2026-07-27',birthWeight:3200,birthLength:50,sex:'girl'};
+const details={albumName:'בדיקת מערכת פרטית',childName:'בדיקה',birthDate:'2026-07-27',birthTime:'03:45',birthWeight:3200,birthLength:50,sex:'girl'};
 const parent=await call('/api/register',{...details,name:'System test',email:`smoke-parent-${suffix}@example.test`,password});
 assert.equal(parent.status,200,JSON.stringify(parent.value));
 const cookie=parent.cookie;
 const me=await call('/api/me',undefined,cookie);assert.equal(me.status,200);
 const album=me.value.albums[0].id;
+assert.equal(me.value.albums[0].birth_time,'03:45');
 const avatar='data:image/jpeg;base64,'+readFileSync(new URL('./avatar-fixture.txt',import.meta.url),'utf8').trim();
 assert.equal((await call('/api/profile',{...details,album,albumName:'תמונת פרופיל',avatar},cookie)).status,200);
 assert.equal((await call('/api/me',undefined,cookie)).value.albums.find(a=>a.id===album).avatar,avatar);
@@ -24,7 +25,8 @@ assert.equal((await call('/api/me',undefined,cookie)).value.albums.find(a=>a.id=
 assert.equal((await call('/api/profile',{...details,album,albumName:'   '},cookie)).status,400);
 assert.equal((await call('/api/profile',{...details,album,avatar:'data:image/svg+xml;base64,PHN2Zz4='},cookie)).status,400);
 const second=await call('/api/albums',{...details,albumName:'בדיקת אלבום שני'},cookie);assert.equal(second.status,201);
-const bytes=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aWQAAAABJRU5ErkJggg==','base64');
+let bytes=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aWQAAAABJRU5ErkJggg==','base64');
+if(process.env.SMOKE_LARGE) bytes=Buffer.concat([bytes,Buffer.alloc(21*1024*1024)]);
 const upload=await call('/api/uploads',{album,name:'smoke.png',type:'image/png',size:bytes.length},cookie);
 assert.equal(upload.status,201,JSON.stringify(upload.value));
 const put=await fetch(upload.value.url,{method:'PUT',headers:{'content-type':'image/png','x-upsert':'false'},body:bytes});assert.equal(put.ok,true,await put.text());

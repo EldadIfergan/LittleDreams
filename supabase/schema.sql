@@ -8,7 +8,7 @@ create table if not exists little_dreams.users (
 );
 create table if not exists little_dreams.albums (
   id text primary key, name text not null, child_name text, birth_date text,
-  birth_weight real, birth_length real, sex text check (sex in ('boy','girl','unspecified')), avatar text
+  birth_weight real, birth_length real, sex text check (sex in ('boy','girl','unspecified')), avatar text, birth_time text
 );
 create table if not exists little_dreams.members (
   user_id text references little_dreams.users(id), album_id text references little_dreams.albums(id),

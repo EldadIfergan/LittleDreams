@@ -1,3 +1,4 @@
+import { birthTime } from './lib/birth-time.js';
 import http from 'node:http';
 import { validateAvatar } from './lib/avatar.js';
 import { DatabaseSync, backup } from 'node:sqlite';
@@ -35,7 +36,7 @@ async function backupDatabase() {
   } catch(e) { console.error('Database backup failed:',e.message); }
   finally { backingUp = false; }
 }
-for (const [column,type] of [['child_name','TEXT'],['birth_date','TEXT'],['birth_weight','REAL'],['birth_length','REAL'],['sex','TEXT'],['avatar','TEXT']]) {
+for (const [column,type] of [['child_name','TEXT'],['birth_date','TEXT'],['birth_weight','REAL'],['birth_length','REAL'],['sex','TEXT'],['avatar','TEXT'],['birth_time','TEXT']]) {
   if (!db.prepare('PRAGMA table_info(albums)').all().some(c => c.name === column)) db.exec(`ALTER TABLE albums ADD COLUMN ${column} ${type}`);
 }
 function childProfile(b) {
@@ -123,7 +124,7 @@ const server = http.createServer(async (req,res) => {
         try {
           db.prepare('INSERT INTO users VALUES(?,?,?,?)').run(user.id,email,name,passwordHash(b.password));
           if (b.invite) accept(user.id,b.invite);
-          else { const album = id(); db.prepare('INSERT INTO albums(id,name,child_name,birth_date,birth_weight,birth_length,sex) VALUES(?,?,?,?,?,?,?)').run(album,albumName,...profile); db.prepare('INSERT INTO members VALUES(?,?,?)').run(user.id,album,'parent'); }
+          else { const album = id(); db.prepare('INSERT INTO albums(id,name,child_name,birth_date,birth_weight,birth_length,sex,birth_time) VALUES(?,?,?,?,?,?,?,?)').run(album,albumName,...profile,birthTime(b.birthTime)); db.prepare('INSERT INTO members VALUES(?,?,?)').run(user.id,album,'parent'); }
           db.exec('COMMIT');
         } catch (e) { db.exec('ROLLBACK'); throw e; }
       } else {
@@ -143,7 +144,7 @@ const server = http.createServer(async (req,res) => {
       const b = await body(req); const name = text(b.albumName,80,'שם האלבום'); const profile = childProfile(b); const album = id();
       db.exec('BEGIN');
       try {
-        db.prepare('INSERT INTO albums(id,name,child_name,birth_date,birth_weight,birth_length,sex,avatar) VALUES(?,?,?,?,?,?,?,?)').run(album,name,...profile,b.avatar===undefined?null:validateAvatar(b.avatar));
+        db.prepare('INSERT INTO albums(id,name,child_name,birth_date,birth_weight,birth_length,sex,avatar,birth_time) VALUES(?,?,?,?,?,?,?,?,?)').run(album,name,...profile,b.avatar===undefined?null:validateAvatar(b.avatar),birthTime(b.birthTime));
         db.prepare('INSERT INTO members VALUES(?,?,?)').run(user,album,'parent');
         db.exec('COMMIT');
       } catch(e) { db.exec('ROLLBACK'); throw e; }
@@ -162,7 +163,7 @@ const server = http.createServer(async (req,res) => {
     }
     if (path === '/api/profile' && req.method === 'POST') {
       const b = await body(req); editor(user,b.album); const profile = childProfile(b);
-      db.prepare('UPDATE albums SET child_name=?,birth_date=?,birth_weight=?,birth_length=?,sex=?,name=COALESCE(?,name),avatar=COALESCE(?,avatar) WHERE id=?').run(...profile,b.albumName===undefined?null:text(b.albumName,80,'שם האלבום'),b.avatar===undefined?null:validateAvatar(b.avatar),b.album);
+      db.prepare('UPDATE albums SET child_name=?,birth_date=?,birth_weight=?,birth_length=?,sex=?,name=COALESCE(?,name),avatar=COALESCE(?,avatar),birth_time=CASE WHEN ? THEN ? ELSE birth_time END WHERE id=?').run(...profile,b.albumName===undefined?null:text(b.albumName,80,'שם האלבום'),b.avatar===undefined?null:validateAvatar(b.avatar),Number(b.birthTime!==undefined),birthTime(b.birthTime),b.album);
       return send(res,200,{ok:true});
     }
     if (path === '/api/me' && req.method === 'GET') return send(res,200,{

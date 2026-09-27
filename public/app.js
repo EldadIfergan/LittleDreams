@@ -190,6 +190,7 @@ function showProfile() {
   $('#child-heading').textContent = current.child_name || 'נכיר את הילד או הילדה?';
   const info = current.birth_date ? ageInfo(current.birth_date) : null;
   const facts = info ? [`גיל: ${info.label}`,`נולד/ה ב־${new Date(current.birth_date+'T12:00:00').toLocaleDateString('he-IL')}`] : ['השלימו תאריך לידה כדי לראות הצעות לפי גיל.'];
+  if (current.birth_time) facts.push(`שעת לידה: ${current.birth_time}`);
   if (current.birth_weight) facts.push(`משקל לידה: ${current.birth_weight.toLocaleString('he-IL')} גרם`);
   if (current.birth_length) facts.push(`אורך בלידה: ${current.birth_length} ס״מ`);
   $('#child-facts').textContent = facts.join(' · ');
@@ -223,7 +224,7 @@ $('#edit-profile').onclick = () => {
   form.reset(); form.elements.albumName.value = current.name;
   $('#avatar-preview').hidden = !current.avatar;
   if (current.avatar) $('#avatar-preview').src = current.avatar;
-  for (const [field,column] of [['childName','child_name'],['birthDate','birth_date'],['birthWeight','birth_weight'],['birthLength','birth_length'],['sex','sex']]) form.elements[field].value = current[column] ?? (field === 'sex' ? 'unspecified' : '');
+  for (const [field,column] of [['childName','child_name'],['birthDate','birth_date'],['birthTime','birth_time'],['birthWeight','birth_weight'],['birthLength','birth_length'],['sex','sex']]) form.elements[field].value = current[column] ?? (field === 'sex' ? 'unspecified' : '');
   $('#profile-error').textContent=''; $('#profile-dialog').showModal();
 };
 $('#profile-form').onsubmit = event => {
