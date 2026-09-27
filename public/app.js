@@ -61,7 +61,7 @@ async function load() {
     $('#album-picker-label').hidden = albums.length < 2;
     await showAlbum();
   } catch(e) {
-    if (e.status === 401) { closeParentTools();document.documentElement.dataset.theme = 'unspecified';document.body.classList.remove('family-view');$('#auth').hidden = false; $('#album').hidden = true; $('#album-hub').hidden = true; $('#my-albums-button').hidden = true; $('#logout').hidden = true; setMode(mode); }
+    if (e.status === 401) { closeParentTools();document.documentElement.dataset.theme = 'unspecified';document.body.classList.remove('family-view');$('#auth').hidden = false; $('#album').hidden = true; $('#album-hub').hidden = true; $('#parent-menu-button').hidden = true; $('#my-albums-button').hidden = true; $('#logout').hidden = true; setMode(mode); }
     else $('#page-error').textContent = e.message;
   }
 }
@@ -473,6 +473,7 @@ $('#profile-form').onsubmit = event => {
 $('#my-albums-button').onclick = async () => {
   try {
     const result = await api('/api/me'); albums = result.albums;
+    closeParentTools(); $('#parent-menu-button').hidden = true;
     $('#album').hidden = true; $('#album-hub').hidden = false;
     document.documentElement.dataset.theme = 'unspecified';
     const list = $('#album-list'); list.replaceChildren();

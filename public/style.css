@@ -72,8 +72,11 @@ main{padding-top:24px;padding-bottom:40px}
 #album .album-heading h1{font-size:32px;margin-bottom:4px;font-weight:600}
 #album .album-heading .eyebrow{margin-bottom:4px}
 #album .album-heading p{font-size:1rem;line-height:1.5}
-.album-title-row{display:flex;align-items:center;justify-content:space-between;gap:16px}
-.album-title-row h1{min-width:0;overflow-wrap:anywhere}
+header{height:auto;min-height:88px;flex-wrap:wrap;gap:12px 24px;padding-block:12px}
+.header-actions{display:flex;align-items:center;gap:8px;margin-inline-start:auto;flex-wrap:wrap}
+header .header-actions button{margin-inline-start:0;white-space:nowrap}
+#album-name{overflow-wrap:anywhere}
+@media(max-width:700px){header{min-height:74px;gap:8px;padding-block:8px}.header-actions .quiet{padding:8px}}
 #parent-menu-button{flex-shrink:0;min-height:44px;padding:8px 14px;font-size:1rem}
 #parent-tools-dialog{width:min(720px,calc(100% - 24px))}
 #parent-tools-dialog .dialog-heading{align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:16px}
@@ -86,7 +89,6 @@ main{padding-top:24px;padding-bottom:40px}
 #parent-tools-dialog .guide-inner{padding:0}
 #parent-tools-dialog .tools-count{margin:0 0 8px;font-weight:600;color:var(--green)}
 #parent-tools-dialog .checklist-row{gap:12px}
-@media(max-width:900px){#album .album-heading>div:first-child{width:100%}}
 #album .child-summary{padding:14px 0;gap:12px;flex-direction:row;flex-wrap:wrap;align-items:center}
 #album .child-avatar{width:56px;height:56px}
 #album .child-summary>div{flex:1;min-width:160px}
