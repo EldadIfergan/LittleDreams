@@ -110,7 +110,8 @@ async function showAlbum() {
 }
 function renderChecklist(items,album,parent) {
   if(current?.id!==album)return;
-  $('#checklist-count').textContent=items.filter(i=>i.completed).length+' רגעים שסומנו';
+  const completedCount=items.filter(i=>i.completed).length;
+  $('#checklist-count').textContent=completedCount===1?'רגע אחד שסומן':completedCount+' רגעים שסומנו';
   const list=$('#checklist-items');
   const opened=new Set([...list.querySelectorAll('details[open]')].map(el=>el.dataset.group));
   const firstRender=list.children.length===0;
@@ -121,7 +122,7 @@ function renderChecklist(items,album,parent) {
     const section=document.createElement('details');section.className='checklist-group';section.dataset.group=item.group;
     section.open=opened.has(item.group)||(firstRender&&item.group==='arrival');
     const summary=document.createElement('summary');summary.textContent=item.groupTitle;
-    const count=document.createElement('span');count.textContent=items.filter(i=>i.group===item.group&&i.completed).length+' סומנו';summary.append(count);
+    const count=document.createElement('span');const n=items.filter(i=>i.group===item.group&&i.completed).length;count.textContent=n===1?' · רגע אחד סומן':' · '+n+' סומנו';summary.append(count);
     const description=document.createElement('p');description.textContent=item.groupDescription;
     const rows=document.createElement('div');rows.className='checklist-group-items';
     section.append(summary,description,rows);list.append(section);groups.set(item.group,rows);
