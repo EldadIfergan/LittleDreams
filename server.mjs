@@ -88,6 +88,7 @@ const server = http.createServer(async (req,res) => {
   res.setHeader('Content-Security-Policy',"default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' blob:; media-src 'self' blob:; object-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");
   try {
     const url = new URL(req.url,'http://localhost'); const path = url.pathname;
+    if (path === '/api/config' && req.method === 'GET') return send(res,200,{directUploads:false});
     if (path === '/healthz' && req.method === 'GET') {
       db.prepare('SELECT 1').get(); return send(res,200,{ok:true});
     }

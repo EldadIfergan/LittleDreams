@@ -142,11 +142,21 @@ $('#moment-form').onsubmit = event => {
   event.preventDefault(); busy(event.target,$('#moment-error'),async () => {
     const form = new FormData(event.target); const files = [...event.target.elements.files.files];
     if (files.length > 5 || files.reduce((s,f) => s+f.size,0) > 20*1024*1024) throw new Error('אפשר לצרף עד 5 קבצים ו־20MB בסך הכול');
-    await api('/api/moments',{album:current.id,title:form.get('title'),date:form.get('date'),description:form.get('description'),files:await Promise.all(files.map(async f => ({name:f.name,type:f.type,data:await base64(f)})))});
+    const config = await api('/api/config');
+    const attachments = [];
+    for (const file of files) {
+      if (config.directUploads) {
+        const upload = await api('/api/uploads',{album:current.id,name:file.name,type:file.type,size:file.size});
+        const response = await fetch(upload.url,{method:'PUT',headers:{'Content-Type':file.type,'x-upsert':'false'},body:file});
+        if (!response.ok) throw new Error('העלאת הקובץ נכשלה. הפרטים נשמרו בטופס ואפשר לנסות שוב.');
+        attachments.push({id:upload.id});
+      } else attachments.push({name:file.name,type:file.type,data:await base64(file)});
+    }
+    await api('/api/moments',{album:current.id,title:form.get('title'),date:form.get('date'),description:form.get('description'),files:attachments});
     $('#moment-dialog').close(); await showAlbum();
   });
 };
-$('#invite-button').onclick = () => { $('#invite-result').hidden = true; $('#invite-error').textContent = ''; $('#invite-dialog').showModal(); };
+$('#invite-button').onclick = () => { $('#invite-result').hidden = true; $('#invite-error').textContent = ''; $('#invite-result small').textContent = location.hostname === 'localhost' ? 'בסביבה המקומית הקישור פועל רק במחשב הזה.' : 'אפשר לשלוח את הקישור באופן פרטי לאדם שהזמנתם.'; $('#invite-dialog').showModal(); };
 $('#invite-form').onsubmit = event => {
   event.preventDefault(); busy(event.target,$('#invite-error'),async () => {
     const result = await api('/api/invites',{album:current.id,role:event.target.elements.role.value});
