@@ -118,7 +118,6 @@ const server = http.createServer(async (req,res) => {
       let user;
       if (path === '/api/register') {
         const name = text(b.name,80,'השם');
-        const albumName = b.invite ? null : text(b.albumName,80,'שם האלבום');
         const profile = b.invite ? null : childProfile(b);
         if (b.invite) inviteRecord(b.invite);
         if (db.prepare('SELECT 1 FROM users WHERE email=?').get(email)) fail(409,'לא ניתן ליצור חשבון עם הכתובת הזאת. נסו להתחבר.');
@@ -127,7 +126,7 @@ const server = http.createServer(async (req,res) => {
         try {
           db.prepare('INSERT INTO users VALUES(?,?,?,?)').run(user.id,email,name,passwordHash(b.password));
           if (b.invite) accept(user.id,b.invite);
-          else { const album = id(); db.prepare('INSERT INTO albums(id,name,child_name,birth_date,birth_weight,birth_length,sex,birth_time) VALUES(?,?,?,?,?,?,?,?)').run(album,albumName,...profile,birthTime(b.birthTime)); db.prepare('INSERT INTO members VALUES(?,?,?)').run(user.id,album,'parent'); }
+          else { const album = id(); db.prepare('INSERT INTO albums(id,name,child_name,birth_date,birth_weight,birth_length,sex,birth_time) VALUES(?,?,?,?,?,?,?,?)').run(album,profile[0],...profile,birthTime(b.birthTime)); db.prepare('INSERT INTO members VALUES(?,?,?)').run(user.id,album,'parent'); }
           db.exec('COMMIT');
         } catch (e) { db.exec('ROLLBACK'); throw e; }
       } else {
@@ -144,7 +143,7 @@ const server = http.createServer(async (req,res) => {
     if (!session) fail(401,'יש להתחבר כדי לצפות באלבום');
     const user = session.user_id;
     if (path === '/api/albums' && req.method === 'POST') {
-      const b = await body(req); const name = text(b.albumName,80,'שם האלבום'); const profile = childProfile(b); const album = id();
+      const b = await body(req); const profile = childProfile(b); const name = profile[0]; const album = id();
       db.exec('BEGIN');
       try {
         db.prepare('INSERT INTO albums(id,name,child_name,birth_date,birth_weight,birth_length,sex,avatar,birth_time) VALUES(?,?,?,?,?,?,?,?,?)').run(album,name,...profile,b.avatar===undefined?null:validateAvatar(b.avatar),birthTime(b.birthTime));
@@ -166,12 +165,12 @@ const server = http.createServer(async (req,res) => {
     }
     if (path === '/api/profile' && req.method === 'POST') {
       const b = await body(req); editor(user,b.album); const profile = childProfile(b);
-      db.prepare('UPDATE albums SET child_name=?,birth_date=?,birth_weight=?,birth_length=?,sex=?,name=COALESCE(?,name),avatar=COALESCE(?,avatar),birth_time=CASE WHEN ? THEN ? ELSE birth_time END WHERE id=?').run(...profile,b.albumName===undefined?null:text(b.albumName,80,'שם האלבום'),b.avatar===undefined?null:validateAvatar(b.avatar),Number(b.birthTime!==undefined),birthTime(b.birthTime),b.album);
+      db.prepare('UPDATE albums SET child_name=?,birth_date=?,birth_weight=?,birth_length=?,sex=?,name=COALESCE(?,name),avatar=COALESCE(?,avatar),birth_time=CASE WHEN ? THEN ? ELSE birth_time END WHERE id=?').run(...profile,profile[0],b.avatar===undefined?null:validateAvatar(b.avatar),Number(b.birthTime!==undefined),birthTime(b.birthTime),b.album);
       return send(res,200,{ok:true});
     }
     if (path === '/api/me' && req.method === 'GET') return send(res,200,{
       user:db.prepare('SELECT name,email FROM users WHERE id=?').get(user),
-      albums:db.prepare('SELECT a.*,m.role FROM albums a JOIN members m ON a.id=m.album_id WHERE m.user_id=?').all(user)
+      albums:db.prepare('SELECT a.*,m.role FROM albums a JOIN members m ON a.id=m.album_id WHERE m.user_id=?').all(user).map(a=>({...a,name:a.child_name || a.name}))
     });
     if (path === '/api/logout' && req.method === 'POST') { db.prepare('DELETE FROM sessions WHERE token=?').run(hash(token)); return send(res,200,{ok:true},{'Set-Cookie':'session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0'}); }
     if (path === '/api/accept' && req.method === 'POST') { const b = await body(req); accept(user,b.token); return send(res,200,{ok:true}); }

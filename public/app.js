@@ -1,8 +1,8 @@
 const $ = selector => document.querySelector(selector);
 let mode = 'register', albums = [], current;
+try {if(localStorage.getItem('little-dreams-returning')==='1')mode='login';} catch {}
 let creatingAlbum = false;
 let invite = new URLSearchParams(location.search).get('invite');
-if (invite) history.replaceState(null,'', '/');
 async function api(path, data) {
   const response = await fetch(path, data === undefined ? {} : {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
   const result = await response.json();
@@ -12,21 +12,25 @@ async function api(path, data) {
 function setMode(value) {
   mode = value;
   const register = mode === 'register';
+  $('#auth').classList.toggle('invited',!!invite);
+  $('#register-tab').textContent=invite?'זו הכניסה הראשונה שלי':'אלבום חדש';
   $('#register-tab').setAttribute('aria-pressed',register);
   $('#login-tab').setAttribute('aria-pressed',!register);
   document.querySelectorAll('.register-field').forEach(el => { el.hidden = !register; el.querySelector('input').required = register; });
-  $('#album-field').hidden = !register || !!invite;
-  $('[name=albumName]').required = register && !invite;
   $('#child-registration').hidden = !register || !!invite;
   $('#child-registration').disabled = !register || !!invite;
   $('[name=password]').autocomplete = register ? 'new-password' : 'current-password';
   $('#invite-note').hidden = !invite;
   $('#auth-title').textContent = register ? invite ? 'מצטרפים לאלבום המשפחתי' : 'מתחילים לאסוף זיכרונות' : 'איזה כיף שחזרתם';
-  $('#auth-submit').textContent = register ? invite ? 'יצירת חשבון והצטרפות' : 'יצירת אלבום' : 'כניסה לאלבום';
+  $('#auth-submit').textContent = register ? invite ? 'הצטרפות וצפייה באלבום' : 'יצירת אלבום' : 'כניסה לאלבום';
   $('#auth-error').textContent = '';
 }
 $('#register-tab').onclick = () => setMode('register');
 $('#login-tab').onclick = () => setMode('login');
+$('#show-password').onclick=()=>{
+  const input=$('#auth-form [name=password]'),show=input.type==='password';
+  input.type=show?'text':'password';$('#show-password').textContent=show?'הסתרת הסיסמה':'הצגת הסיסמה';$('#show-password').setAttribute('aria-pressed',show);
+};
 async function busy(form, error, fn) {
   const button = form.querySelector('button.primary'); button.disabled = true; error.textContent = '';
   try { await fn(); } catch(e) { error.textContent = e.message; } finally { button.disabled = false; }
@@ -36,26 +40,28 @@ $('#auth-form').onsubmit = event => {
     const data = Object.fromEntries(new FormData(event.target));
     if (mode === 'register' && invite) data.invite = invite;
     await api(`/api/${mode}`,data);
-    if (mode === 'register') invite = null;
+    if (mode === 'register') {invite = null;history.replaceState(null,'','/');}
+    mode='login';try {localStorage.setItem('little-dreams-returning','1');} catch {}
     event.target.reset(); await load();
   });
 };
 async function load() {
   try {
     const result = await api('/api/me');
+    mode='login';try {localStorage.setItem('little-dreams-returning','1');} catch {}
     if (invite) {
-      try { await api('/api/accept',{token:invite}); invite = null; return load(); }
+      try { await api('/api/accept',{token:invite}); invite = null;history.replaceState(null,'','/');return load(); }
       catch(e) { $('#page-error').textContent = e.message; invite = null; }
     }
     albums = result.albums; current = albums.find(a => a.id === current?.id) || albums[0];
     $('#auth').hidden = true; $('#album').hidden = false; $('#logout').hidden = false;
-    $('#my-albums-button').hidden = false;
+    $('#my-albums-button').hidden = albums.length<2 && current.role!=='parent';
     $('#album-hub').hidden = true;
-    $('#album-picker').replaceChildren(...albums.map(a => { const option = new Option(a.name,a.id); option.selected = a.id === current.id; return option; }));
+    $('#album-picker').replaceChildren(...albums.map(a => { const option = new Option(a.child_name || a.name,a.id); option.selected = a.id === current.id; return option; }));
     $('#album-picker-label').hidden = albums.length < 2;
     await showAlbum();
   } catch(e) {
-    if (e.status === 401) { document.documentElement.dataset.theme = 'unspecified'; $('#auth').hidden = false; $('#album').hidden = true; $('#album-hub').hidden = true; $('#my-albums-button').hidden = true; $('#logout').hidden = true; setMode(mode); }
+    if (e.status === 401) { document.documentElement.dataset.theme = 'unspecified';document.body.classList.remove('family-view');$('#auth').hidden = false; $('#album').hidden = true; $('#album-hub').hidden = true; $('#my-albums-button').hidden = true; $('#logout').hidden = true; setMode(mode); }
     else $('#page-error').textContent = e.message;
   }
 }
@@ -63,13 +69,16 @@ let albumRender=0;
 async function showAlbum() {
   const render=++albumRender,album=current.id;
   showProfile();
-  $('#album-name').textContent = current.name;
+  $('#album-name').textContent = current.child_name || current.name;
   const parent = current.role === 'parent';
+  document.body.classList.toggle('family-view',!parent);
+  $('#development-checklist').hidden=!parent;
+  $('.child-summary').hidden=!parent;
   for (const name of ['add-button','invite-button','first-moment']) $(`#${name}`).hidden = !parent;
-  $('#album-description').textContent = parent ? 'המקומות, הפעמים הראשונות, וכל מה שביניהם.' : 'מוזמנים לצפות ברגעים המשפחתיים ולהוסיף תגובות';
+  $('#album-description').textContent = parent ? 'המקומות, הפעמים הראשונות, וכל מה שביניהם.' : 'כאן רואים את התמונות והסיפורים. אפשר לגלול למטה ולכתוב תגובה מתחת לכל אירוע.';
   $('#moments').replaceChildren(); $('#empty').hidden = true; $('#count').textContent = 'טוענים רגעים…';
   $('#checklist-items').replaceChildren();$('#checklist-count').textContent='';$('#checklist-error').textContent='';$('#checklist-status').textContent='';
-  const [moments,items] = await Promise.all([api('/api/moments?album='+album),api('/api/checklist?album='+album)]);
+  const [moments,items] = await Promise.all([api('/api/moments?album='+album),parent?api('/api/checklist?album='+album):Promise.resolve([])]);
   if(render!==albumRender || current?.id!==album)return;
   renderChecklist(items,album,parent);
   let month='';
@@ -84,7 +93,7 @@ async function showAlbum() {
     date.textContent = new Date(moment.date + 'T12:00:00').toLocaleDateString('he-IL',{day:'numeric',month:'long',year:'numeric'});
     const title = document.createElement('h2'); title.textContent = moment.title;
     const description = document.createElement('p'); description.textContent = moment.description;
-    content.append(date,title);
+    const heading=document.createElement('div');heading.className='event-heading';heading.append(date,title);content.append(heading);
     if (parent) {
       const edit=document.createElement('button');edit.type='button';edit.className='edit-event';
       edit.setAttribute('aria-label',`עריכת האירוע: ${moment.title}`);edit.title='עריכת אירוע';
@@ -99,21 +108,51 @@ async function showAlbum() {
       remove.onclick=()=>openDelete(moment,moments,album);
       card.append(remove);
     }
-    const details = document.createElement('details');
-    const summary = document.createElement('summary'); summary.textContent = 'הסיפור והקבצים';
-    details.append(summary,description);
-    let coverShown = false;
-    moment.files.forEach(file => {
-      const src = `/api/files/${file.id}`;
-      if (file.type.startsWith('image/')) { const img = document.createElement('img'); img.src = src; img.alt = file.name; img.loading = 'lazy'; if (!coverShown) { card.append(img); coverShown = true; } else details.append(img); }
-      else if (file.type.startsWith('video/')) { const video = document.createElement('video'); video.src = src; video.controls = true; video.preload = 'metadata'; video.setAttribute('playsinline',''); if (!coverShown) { card.append(video); coverShown = true; } else details.append(video); }
-      const link = document.createElement('a'); link.href = src; link.textContent = `הורדת ${file.name}`; link.download = file.name; link.className = 'file-link'; details.append(link);
+    if(moment.description)content.append(description);
+    const gallery=mediaGallery(moment);if(gallery)content.append(gallery);
+    moment.files.filter(file=>file.type==='application/pdf').forEach(file=>{
+      const link=document.createElement('a');link.href=`/api/files/${file.id}`;link.download=file.name;link.textContent=`פתיחת המסמך: ${file.name}`;link.className='file-link';content.append(link);
     });
-    if (moment.description || moment.files.length) content.append(details);
     content.append(commentSection(moment));
     card.append(content);const item=document.createElement('div');item.className='timeline-item';item.append(card);$('#moments').append(item);
   });
 }
+function mediaGallery(moment,enlarged=false,start=0) {
+  const files=moment.files.filter(f=>f.type.startsWith('image/')||f.type.startsWith('video/'));
+  if(!files.length)return null;
+  let index=start;
+  const gallery=document.createElement('section');gallery.className='event-gallery';gallery.setAttribute('aria-label',`תמונות וסרטונים מהאירוע: ${moment.title}`);
+  const screen=document.createElement('div');screen.className='gallery-screen';
+  const controls=document.createElement('div');controls.className='gallery-controls';
+  const previous=document.createElement('button');previous.type='button';previous.className='secondary';previous.textContent='הקודם';previous.setAttribute('aria-label','לתמונה או לסרטון הקודמים');
+  const next=document.createElement('button');next.type='button';next.className='secondary';next.textContent='הבא';next.setAttribute('aria-label','לתמונה או לסרטון הבאים');
+  const position=document.createElement('span');position.setAttribute('role','status');
+  controls.append(previous,position,next);previous.hidden=next.hidden=files.length===1;
+  const open=document.createElement('button');open.type='button';open.className='secondary enlarge-media';open.hidden=enlarged;
+  const download=document.createElement('a');download.className='file-link gallery-download';
+  open.onclick=()=>{
+    screen.querySelector('video')?.pause();
+    $('#media-title').textContent=moment.title;$('#media-content').replaceChildren(mediaGallery(moment,true,index));$('#media-dialog').showModal();
+  };
+  function render() {
+    screen.querySelector('video')?.pause();
+    const file=files[index],isVideo=file.type.startsWith('video/');
+    const media=document.createElement(isVideo?'video':'img');media.src=`/api/files/${file.id}`;
+    if(isVideo){media.controls=true;media.preload='metadata';media.setAttribute('playsinline','');media.setAttribute('aria-label',`סרטון מהאירוע: ${moment.title}`);}
+    else {media.alt=`${moment.title} — תמונה ${index+1}`;media.loading='lazy';}
+    const error=document.createElement('p');error.className='error';error.hidden=true;error.setAttribute('role','alert');
+    media.onerror=()=>{error.textContent='לא הצלחנו להציג את הקובץ. אפשר לנסות לרענן את הדף.';error.hidden=false;};
+    screen.replaceChildren(media,error);
+    position.textContent=`${isVideo?'סרטון':'תמונה'} ${index+1} מתוך ${files.length}`;
+    previous.disabled=index===0;next.disabled=index===files.length-1;
+    open.textContent=isVideo?'צפייה בסרטון בחלון גדול':'הגדלת התמונה';
+    download.href=media.src;download.download=file.name;download.textContent=isVideo?'שמירת הסרטון למכשיר':'שמירת התמונה למכשיר';
+  }
+  previous.onclick=()=>{if(index>0){index--;render();}};
+  next.onclick=()=>{if(index<files.length-1){index++;render();}};
+  gallery.append(screen,controls,open,download);render();return gallery;
+}
+$('#media-dialog').addEventListener('close',()=>{$('#media-content').querySelectorAll('video').forEach(video=>video.pause());$('#media-content').replaceChildren();});
 let deletingMoment=null,deletePending=false;
 function openDelete(moment,moments,album) {
   deletingMoment={moment,album};
@@ -193,10 +232,10 @@ function renderChecklist(items,album,parent) {
   }
 }
 function commentSection(moment) {
-  const section = document.createElement('details'); section.className = 'comments';
-  const summary = document.createElement('summary');
+  const section = document.createElement('section'); section.className = 'comments';
+  const summary = document.createElement('h3');
   let count = moment.comments.length;
-  const updateCount = () => { summary.textContent = count ? `תגובות המשפחה (${count})` : 'תגובות המשפחה · הוספת תגובה'; };
+  const updateCount = () => { summary.textContent = count ? `תגובות לאירוע (${count})` : 'תגובה לאירוע הזה'; };
   updateCount();
   const list = document.createElement('div'); list.className = 'comment-list';
   const empty = document.createElement('p'); empty.className = 'comment-empty'; empty.textContent = 'עוד אין תגובות. אפשר להשאיר כאן כמה מילים חמות.'; empty.hidden = count > 0;
@@ -209,11 +248,11 @@ function commentSection(moment) {
   }
   moment.comments.forEach(appendComment);
   const form = document.createElement('form'); form.className = 'comment-form';
-  const label = document.createElement('label'); label.textContent = 'כמה מילים מהלב';
-  const input = document.createElement('textarea'); input.rows = 2; input.maxLength = 2000; input.required = true; input.placeholder = 'איזה רגע מתוק…'; label.append(input);
+  const label = document.createElement('label'); label.textContent = `כתיבת תגובה ל״${moment.title}״`;
+  const input = document.createElement('textarea'); input.rows = 2; input.maxLength = 2000; input.required = true; input.placeholder = 'לחצו כאן וכתבו תגובה'; label.append(input);
   const error = document.createElement('p'); error.className = 'error'; error.setAttribute('role','alert');
   const status = document.createElement('p'); status.className = 'comment-status'; status.setAttribute('role','status');
-  const button = document.createElement('button'); button.className = 'primary'; button.textContent = 'שליחת תגובה';
+  const button = document.createElement('button'); button.className = 'primary'; button.textContent = 'פרסום התגובה';
   form.append(label,error,button,status);
   form.onsubmit = event => {
     event.preventDefault(); status.textContent = '';
@@ -221,7 +260,7 @@ function commentSection(moment) {
     input.disabled = true;
     busy(form,error,async()=>{
       const comment = await api('/api/comments',{moment:moment.id,body:input.value});
-      appendComment(comment); count++; updateCount(); empty.hidden = true; input.value = ''; status.textContent = 'התגובה נוספה';
+      appendComment(comment); count++; updateCount(); empty.hidden = true; input.value = ''; status.textContent = 'התגובה פורסמה והמשפחה יכולה לראות אותה.';
     }).finally(()=>{ input.disabled = false; });
   };
   section.append(summary,empty,list,form); return section;
@@ -377,9 +416,8 @@ function showProfile() {
 $('#edit-profile').onclick = () => {
   creatingAlbum = false;
   $('#profile-title').textContent = 'פרטי הילד או הילדה';
-  $('#new-album-name').hidden = false; $('#new-album-name input').required = true;
   const form = $('#profile-form');
-  form.reset(); form.elements.albumName.value = current.name;
+  form.reset();
   $('#avatar-preview').hidden = !current.avatar;
   if (current.avatar) $('#avatar-preview').src = current.avatar;
   for (const [field,column] of [['childName','child_name'],['birthDate','birth_date'],['birthTime','birth_time'],['birthWeight','birth_weight'],['birthLength','birth_length'],['sex','sex']]) form.elements[field].value = current[column] ?? (field === 'sex' ? 'unspecified' : '');
@@ -404,11 +442,10 @@ $('#my-albums-button').onclick = async () => {
     const list = $('#album-list'); list.replaceChildren();
     for (const album of albums) {
       const button = document.createElement('button'); button.className = 'album-tile'; button.dataset.sex = album.sex || 'unspecified';
-      const name = document.createElement('strong'); name.textContent = album.name;
+      const name = document.createElement('strong'); name.textContent = album.child_name || album.name;
       if (album.avatar) { const img = document.createElement('img'); img.className='child-avatar'; img.src=album.avatar; img.alt=album.child_name || 'תמונת פרופיל'; button.append(img); }
-      const child = document.createElement('span'); child.textContent = album.child_name || 'פרטי הילד טרם הושלמו';
       const role = document.createElement('small'); role.textContent = album.role === 'parent' ? 'הורה · ניהול והוספת רגעים' : 'משפחה · צפייה ותגובות';
-      button.append(name,child,role);
+      button.append(name,role);
       button.onclick = async () => { current = album; try { await showAlbum(); $('#album-hub').hidden = true; $('#album').hidden = false; } catch(e) { $('#page-error').textContent = e.message; } };
       list.append(button);
     }
@@ -418,7 +455,6 @@ $('#new-album-button').onclick = () => {
   creatingAlbum = true; $('#profile-form').reset(); $('#profile-error').textContent = '';
   $('#avatar-preview').hidden = true;
   $('#profile-title').textContent = 'אלבום לילד נוסף';
-  $('#new-album-name').hidden = false; $('#new-album-name input').required = true;
   $('#profile-dialog').showModal();
 };
 async function avatarImage(file) {

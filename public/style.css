@@ -48,3 +48,47 @@ fieldset{border:0;padding:0;margin:24px 0}legend{font-size:16px;margin-bottom:14
 
 .media-pickers .upload{margin-bottom:12px}.file-picker-help{margin:12px 0}.file-picker-help summary{cursor:pointer;color:var(--green)}.file-picker-help p{font-size:.85rem;margin:12px 0}#file-selection-status{font-size:.9rem;color:var(--green)}
 .delete-event{left:64px;color:#a52b32}.delete-event:hover{background:#fff0f0}.edit-event:disabled{opacity:.5;cursor:wait}
+
+/* Keep each event's story, media navigation and comment form visible. */
+.editable>.card-content:first-of-type{padding:24px 28px}
+.editable .event-heading{padding-inline-end:100px;min-height:48px}
+.event-heading time{font-size:1rem}
+.event-heading h2{font-size:1.5rem;font-weight:600}
+.event-gallery{margin:20px 0}
+.gallery-screen img,.gallery-screen video{width:100%;height:auto;max-height:480px;aspect-ratio:auto;object-fit:contain;border-radius:12px}
+.gallery-controls{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:12px}
+.gallery-controls span{flex:1;text-align:center;font-size:1rem;color:var(--ink)}
+.gallery-controls button,.enlarge-media{font-size:1rem;min-height:48px;min-width:90px;padding:10px 16px}
+.enlarge-media{width:100%;margin-top:12px}
+.gallery-download{text-align:center;font-size:1rem;min-height:48px}
+.comments h3{font-size:1.2rem;margin:20px 0 10px;color:var(--ink)}
+.comments .comment-form label,.comments .comment p,.comments .comment-empty{font-size:1.0625rem;color:var(--ink)}
+.comments textarea{font-size:1.125rem;min-height:100px;border-color:var(--muted)}
+.comments .comment-form .primary{width:100%;font-size:1.0625rem;min-height:52px}
+.comments .comment-status{font-size:1rem!important;color:var(--green);font-weight:600}
+.comments .comment time{font-size:.875rem}
+#media-dialog{width:min(950px,calc(100% - 20px))}
+#media-dialog .dialog-heading{align-items:center;flex-wrap:wrap}
+#media-dialog .media-close{width:auto;height:auto;min-height:48px;font-size:1rem;flex-shrink:0}
+#media-dialog .gallery-screen img,#media-dialog .gallery-screen video{max-height:60dvh}
+.auth.invited{display:block;max-width:540px}
+.auth.invited .intro{display:none}
+#auth-form label,#auth-form .tabs button,#auth-form .primary,#auth-form .quiet{font-size:1rem;min-height:48px}
+#invite-note{color:var(--ink);font-size:1.0625rem}
+.family-view .album-heading{padding-bottom:20px}
+.family-view .album-heading .eyebrow{display:none}
+.family-view .album-heading p{font-size:1.125rem;color:var(--ink);max-width:650px}
+.family-view .moments{padding-inline-start:0;border:0}
+.family-view .timeline-item:before{display:none}
+.family-view .timeline-heading{margin-top:24px}
+.family-view .timeline-heading span,.family-view .timeline-month{font-size:1rem}
+.family-view .card-content>p{font-size:1.125rem;color:var(--ink)}
+.family-view header .quiet{font-size:1rem;min-height:48px}
+@media(max-width:600px){
+  .editable>.card-content:first-of-type{padding:20px}
+  .card-content{padding:20px}
+  .family-view main{padding:24px 14px 40px}
+  .gallery-controls{gap:6px}
+  .gallery-controls button{padding:10px 12px;min-width:72px}
+  #media-dialog{padding:16px}
+}
