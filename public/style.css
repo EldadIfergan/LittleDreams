@@ -50,6 +50,23 @@ fieldset{border:0;padding:0;margin:24px 0}legend{font-size:16px;margin-bottom:14
 .delete-event{left:64px;color:#a52b32}.delete-event:hover{background:#fff0f0}.edit-event:disabled{opacity:.5;cursor:wait}
 
 /* Keep each event's story, media navigation and comment form visible. */
+.photo-status{font-size:1.125rem;color:var(--green);font-weight:600}
+.photo-status:empty{display:none}
+.photo-request-control{border-top:1px solid var(--line);margin-top:24px;padding-top:20px}
+.photo-request-control button,#photo-send{width:100%;font-size:1.0625rem;min-height:52px}
+.photo-request-control p,.photo-review p,#photo-request-dialog p{font-size:1rem;color:var(--ink)}
+.photo-request-state{font-weight:600}
+.photo-review{margin:24px 0;padding:24px;background:var(--surface);border:1px solid var(--green);border-radius:16px}
+#photo-review-list{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,260px),1fr));gap:20px}
+.photo-review-card{padding:16px;border:1px solid var(--line);border-radius:12px;min-width:0}
+.photo-review-card>img{display:block;width:100%;height:200px;object-fit:contain;margin:12px 0}
+.photo-review-card button{font-size:1rem;min-height:48px;width:100%;margin-top:10px}
+.photo-selected-row{display:flex;flex-wrap:wrap;align-items:center;gap:12px;margin:16px 0}
+.photo-selected-row img{width:90px;height:90px;object-fit:contain}
+.photo-selected-row span{flex:1;overflow-wrap:anywhere;min-width:100px}
+.photo-selected-row button{min-height:48px;font-size:1rem}
+#photo-request-dialog .photo-close{width:auto;height:auto;min-height:48px;font-size:1rem}
+#photo-request-dialog .upload{font-size:1.0625rem}
 .editable>.card-content:first-of-type{padding:24px 28px}
 .editable .event-heading{padding-inline-end:100px;min-height:48px}
 .event-heading time{font-size:1rem}

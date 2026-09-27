@@ -3,7 +3,7 @@
   "framework": null,
   "outputDirectory": "public",
   "regions": ["fra1"],
-  "functions": {"api/index.js": {"maxDuration": 30,"includeFiles":"supabase/prod-ca-2021.crt"}},
+  "functions": {"api/index.js": {"maxDuration": 30,"includeFiles":"supabase/{prod-ca-2021.crt,006-photo-requests.sql}"}},
   "rewrites": [{"source": "/api/:path*", "destination": "/api/index"}],
   "headers": [{"source": "/(.*)", "headers": [
     {"key":"X-Content-Type-Options","value":"nosniff"},

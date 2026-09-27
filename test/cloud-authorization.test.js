@@ -14,9 +14,13 @@ let signedIn = true, role = 'viewer', statements = [], momentExists = true;
 pg.Pool.prototype.connect = async () => ({
   async query(sql) {
     statements.push(sql);
+    if (sql.startsWith('SELECT to_regclass')) return {rows:[{requests:'photo_requests',uploads:'photo_request_uploads'}]};
     if (sql.startsWith('SELECT user_id FROM sessions')) return {rows:signedIn ? [{user_id:'user'}] : []};
     if (sql.startsWith('SELECT role FROM members')) return {rows:role ? [{role}] : []};
     if (sql.startsWith('SELECT album_id FROM moments')) return {rows:[{album_id:'album'}]};
+    if (sql.startsWith('SELECT id,album_id FROM moments')) return {rows:momentExists ? [{id:'moment',album_id:'album'}] : []};
+    if (sql.startsWith('SELECT moment_id FROM photo_requests')) return {rows:[{moment_id:'moment'}]};
+    if (sql.startsWith('SELECT r.*,m.album_id FROM photo_requests')) return {rows:[{id:'photo',album_id:'album',user_id:'sender',status:'pending'}]};
     if (sql.startsWith('SELECT id FROM moments')) return {rows:momentExists ? [{id:'moment'}] : []};
     if (sql.startsWith('SELECT name FROM users')) return {rows:[{name:'Family'}]};
     return {rows:[]};
@@ -58,6 +62,19 @@ test('outsiders cannot read moments or add comments', async () => {
   assert.equal((await request('/api/moments?album=album')).status,403);
   assert.equal((await request('/api/comments',{moment:'moment',body:'hello'})).status,403);
   assert.ok(!statements.some(s=>s.startsWith('INSERT')));
+});
+
+test('cloud photo requests enforce membership, photo types and parent-only approval',async()=>{
+  role=null;
+  assert.equal((await request('/api/photo-requests?album=album')).status,403);
+  assert.equal((await request('/api/photo-requests/uploads',{moment:'moment',name:'x.png',type:'image/png',size:10})).status,403);
+  assert.equal((await request('/api/photo-requests',{moment:'moment',files:[{id:'photo'}]})).status,403);
+  role='viewer';
+  assert.equal((await request('/api/photo-requests/uploads',{moment:'moment',name:'x.svg',type:'image/svg+xml',size:10})).status,400);
+  assert.equal((await request('/api/photo-requests/review',{id:'photo',decision:'approved'})).status,403);
+  assert.ok(!statements.some(s=>s.startsWith('INSERT INTO files')));
+  assert.equal((await request('/api/photo-requests/files/photo')).status,403,'another viewer cannot preview pending photos');
+  assert.equal((await request('/api/photo-requests',{moment:'moment',files:[{id:'x'},{id:'x'}]})).status,400);
 });
 test('parent deletion commits related record removal; missing events cause no deletion', async () => {
   role='parent';momentExists=true;

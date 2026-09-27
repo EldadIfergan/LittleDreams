@@ -11,6 +11,8 @@
 <section id="album-hub" hidden><div class="album-heading"><div><span class="eyebrow">כל הסיפורים המשפחתיים</span><h1>האלבומים שלי</h1><p>האלבומים שלכם ואלה שהוזמנתם אליהם.</p></div><button id="new-album-button" class="primary">＋ אלבום לילד נוסף</button></div><div id="album-list"></div></section><section id="album" hidden>
   <div class="album-heading"><div><span class="eyebrow">האלבום המשפחתי שלנו</span><h1 id="album-name"></h1><p id="album-description">המקומות, הפעמים הראשונות, וכל מה שביניהם.</p></div><div class="actions"><button id="invite-button" class="secondary">הזמנת המשפחה</button><button id="add-button" class="primary">＋ רגע חדש</button></div></div>
   <label id="album-picker-label" hidden>בחירת אלבום<select id="album-picker"></select></label>
+  <p id="photo-status" class="photo-status" role="status"></p>
+  <section id="photo-review" class="photo-review" aria-labelledby="photo-review-title" hidden><h2 id="photo-review-title"></h2><p>המשפחה שלחה תמונות לרגעים באלבום. רק תמונות שתאשרו יופיעו לכולם.</p><div id="photo-review-list"></div></section>
   <section class="child-summary"><img id="child-avatar" class="child-avatar" alt="תמונת הפרופיל" hidden><div><h2 id="child-heading">פרטי הילד או הילדה</h2><p id="child-facts"></p></div><button id="edit-profile" class="quiet">עדכון פרטים</button></section>
   <details class="parent-guide" id="parent-guide"><summary>לגדול יחד · הצעות ומידע להורים</summary><div class="guide-inner"><p id="guide-age"></p><div id="suggestion"></div><h2>לקרוא, להבין ולנסות יחד</h2><div id="articles"></div><small>התוכן הוא מידע כללי לפי גיל, ולא הערכה אישית או אבחון. משקל ואורך בלידה נשמרים לתיעוד ואינם משמשים להסקת מסקנות רפואיות. לפגים יש להתאים את ההתייחסות לגיל עם טיפת חלב. אם יש חשש להתפתחות או אובדן יכולת שכבר נרכשה, פנו לטיפת חלב או לרופא הילדים.</small></div></details>
   <details id="development-checklist" class="development-checklist"><summary>אבני הדרך שלנו <span id="checklist-count"></span></summary><p>התפתחות, חוויות ומסורות — בחרו את הרגעים שמתאימים למשפחה שלכם. הרשימה מיועדת לתיעוד ואינה כלי להערכה התפתחותית. מידע לפי גיל נמצא ב״לגדול יחד״.</p><div id="checklist-items"></div><p id="checklist-error" class="error" role="alert"></p><p id="checklist-status" role="status"></p></details>
@@ -21,6 +23,14 @@
 <p id="page-error" class="error" role="alert"></p>
 </main>
 <dialog id="media-dialog" aria-labelledby="media-title"><div class="dialog-heading"><h2 id="media-title"></h2><button type="button" class="close secondary media-close">סגירה וחזרה לאלבום</button></div><div id="media-content"></div></dialog>
+<dialog id="photo-request-dialog" aria-labelledby="photo-request-title"><form id="photo-request-form">
+  <div class="dialog-heading"><h2 id="photo-request-title">שליחת תמונות להורים</h2><button type="button" class="close secondary photo-close">סגירה</button></div>
+  <p id="photo-request-moment"></p><p>התמונות יופיעו באלבום רק אחרי אישור ההורים.</p>
+  <label class="upload">בחירת תמונות מהטלפון<input id="photo-picker" type="file" accept="image/jpeg,image/png,image/webp,image/gif" multiple></label>
+  <p>אפשר לשלוח עד 10 תמונות, עד 10MB לתמונה.</p><div id="photo-selected"></div>
+  <p id="photo-request-error" class="error" role="alert"></p><p id="photo-request-progress" role="status"></p>
+  <button class="primary" id="photo-send">שליחת התמונות לאישור</button><button id="photo-cancel" type="button" class="quiet" hidden>ביטול ההעלאה</button>
+</form></dialog>
 <dialog id="delete-dialog" aria-labelledby="delete-title"><form id="delete-form">
   <h2 id="delete-title">מחיקת אירוע</h2><p id="delete-description"></p>
   <label id="delete-choice-label">מה לעשות עם המדיה והקבצים?<select id="delete-choice" required><option value="">בחרו אפשרות</option><option value="transfer">להעביר לאירוע אחר</option><option value="delete">למחוק יחד עם האירוע</option></select></label>

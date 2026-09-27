@@ -1,5 +1,6 @@
 import { checklist, milestoneKey } from './lib/checklist.js';
 import { planEdit } from './lib/event-edit.js';
+import { photoDetails, requestFiles, reviewDecision, approvalCapacity } from './lib/photo-requests.js';
 import { birthTime } from './lib/birth-time.js';
 import http from 'node:http';
 import { validateAvatar } from './lib/avatar.js';
@@ -23,6 +24,8 @@ CREATE TABLE IF NOT EXISTS checklist(album_id TEXT NOT NULL REFERENCES albums(id
 CREATE TABLE IF NOT EXISTS files(id TEXT PRIMARY KEY,moment_id TEXT REFERENCES moments(id),name TEXT,type TEXT);
 CREATE TABLE IF NOT EXISTS comments(id TEXT PRIMARY KEY,moment_id TEXT NOT NULL REFERENCES moments(id),user_id TEXT NOT NULL REFERENCES users(id),body TEXT NOT NULL,created INTEGER NOT NULL);
 CREATE INDEX IF NOT EXISTS comments_moment ON comments(moment_id,created);
+CREATE TABLE IF NOT EXISTS photo_requests(id TEXT PRIMARY KEY,moment_id TEXT NOT NULL REFERENCES moments(id) ON DELETE CASCADE,user_id TEXT NOT NULL REFERENCES users(id),name TEXT NOT NULL,type TEXT NOT NULL,size INTEGER NOT NULL,created INTEGER NOT NULL,status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','approved','rejected')));
+CREATE INDEX IF NOT EXISTS photo_requests_moment ON photo_requests(moment_id,status,user_id);
 `);
 const id = () => randomBytes(24).toString('hex');
 let backingUp = false;
@@ -101,7 +104,7 @@ const server = http.createServer(async (req,res) => {
       if (req.headers.origin && req.headers.origin !== `http://${req.headers.host}` && req.headers.origin !== `https://${req.headers.host}`) fail(403,'מקור הבקשה אינו מורשה');
       if (!req.headers['content-type']?.startsWith('application/json')) fail(415,'נדרשת בקשת JSON');
     }
-    if (req.method === 'GET' && ['/', '/app.js', '/style.css','/favicon.svg','/media.js','/vendor/mediabunny.mjs'].includes(path)) {
+    if (req.method === 'GET' && ['/', '/app.js', '/style.css','/favicon.svg','/media.js','/photo-requests.js','/vendor/mediabunny.mjs'].includes(path)) {
       const name = path === '/' ? 'index.html' : path.slice(1);
       res.setHeader('Content-Type', {html:'text/html; charset=utf-8',js:'text/javascript; charset=utf-8',mjs:'text/javascript; charset=utf-8',css:'text/css; charset=utf-8',svg:'image/svg+xml'}[name.split('.').pop()]);
       return res.end(readFileSync(join(root,'public',name)));
@@ -199,11 +202,64 @@ const server = http.createServer(async (req,res) => {
       }
       return send(res,200,moments);
     }
+    if(path==='/api/photo-requests' && req.method==='GET') {
+      const album=url.searchParams.get('album'),member=membership(user,album);
+      const sql=`SELECT r.*,u.name AS author,m.title AS moment_title FROM photo_requests r JOIN moments m ON m.id=r.moment_id JOIN users u ON u.id=r.user_id WHERE m.album_id=? AND ${member.role==='parent'?"r.status='pending'":'r.user_id=?'} ORDER BY r.created,r.id`;
+      return send(res,200,db.prepare(sql).all(...(member.role==='parent'?[album]:[album,user])));
+    }
+    if(path==='/api/photo-requests' && req.method==='POST') {
+      const b=await body(req);requestFiles(b.files);
+      const moment=db.prepare('SELECT id,album_id FROM moments WHERE id=?').get(text(b.moment,80,'מזהה הרגע'));
+      if(!moment)fail(404,'הרגע לא נמצא');membership(user,moment.album_id);
+      const count=db.prepare("SELECT count(*) AS n FROM photo_requests WHERE moment_id=? AND user_id=? AND status='pending'").get(moment.id,user).n;
+      if(count+b.files.length>10)fail(400,'אפשר לשלוח עד 10 תמונות שממתינות לאישור לכל רגע');
+      const files=b.files.map(f=>{
+        if(typeof f.data!=='string')fail(400,'התמונה אינה תקינה');
+        const bytes=Buffer.from(f.data,'base64');return {id:id(),...photoDetails({...f,size:bytes.length}),bytes};
+      });
+      db.exec('BEGIN');
+      try {
+        for(const f of files) {
+          writeFileSync(join(data,'uploads',f.id),f.bytes);
+          db.prepare("INSERT INTO photo_requests VALUES(?,?,?,?,?,?,?,'pending')").run(f.id,moment.id,user,f.name,f.type,f.size,Date.now());
+        }
+        db.exec('COMMIT');
+      } catch(e) {db.exec('ROLLBACK');for(const f of files){try{unlinkSync(join(data,'uploads',f.id));}catch{}}throw e;}
+      return send(res,201,{ok:true});
+    }
+    if(path==='/api/photo-requests/review' && req.method==='POST') {
+      const b=await body(req);reviewDecision(b.decision);
+      const request=db.prepare('SELECT r.*,m.album_id FROM photo_requests r JOIN moments m ON m.id=r.moment_id WHERE r.id=?').get(text(b.id,80,'מזהה הבקשה'));
+      if(!request)fail(404,'הבקשה לא נמצאה');editor(user,request.album_id);
+      if(request.status===b.decision)return send(res,200,{ok:true});
+      if(request.status!=='pending')fail(409,'הבקשה כבר טופלה. רעננו את האלבום');
+      if(b.decision==='approved') {
+        const files=db.prepare('SELECT id FROM files WHERE moment_id=?').all(request.moment_id);
+        approvalCapacity(files.length+1,0);
+        approvalCapacity(files.length+1,[...files,request].reduce((sum,f)=>sum+statSync(join(data,'uploads',f.id)).size,0));
+      }
+      db.exec('BEGIN');
+      try {
+        if(b.decision==='approved')db.prepare('INSERT INTO files VALUES(?,?,?,?)').run(request.id,request.moment_id,request.name,request.type);
+        db.prepare('UPDATE photo_requests SET status=? WHERE id=?').run(b.decision,request.id);
+        db.exec('COMMIT');
+      } catch(e) {db.exec('ROLLBACK');throw e;}
+      if(b.decision==='rejected'){try{unlinkSync(join(data,'uploads',request.id));}catch(e){if(e.code!=='ENOENT')console.error('Rejected photo cleanup failed');}}
+      return send(res,200,{ok:true});
+    }
+    if(path.startsWith('/api/photo-requests/files/') && req.method==='GET') {
+      const request=db.prepare("SELECT r.*,m.album_id FROM photo_requests r JOIN moments m ON m.id=r.moment_id WHERE r.id=? AND r.status='pending'").get(path.split('/').pop());
+      if(!request)fail(404,'התמונה לא נמצאה');const member=membership(user,request.album_id);
+      if(member.role!=='parent' && request.user_id!==user)fail(403,'אין הרשאה לצפות בתמונה הזאת');
+      const file=join(data,'uploads',request.id);if(!existsSync(file))fail(404,'התמונה לא נמצאה');
+      res.setHeader('Content-Type',request.type);return res.end(readFileSync(file));
+    }
     if (path === '/api/moments/delete' && req.method === 'POST') {
       const b=await body(req);editor(user,b.album);
       const moment=text(b.id,80,'מזהה האירוע');
       if(!db.prepare('SELECT id FROM moments WHERE id=? AND album_id=?').get(moment,b.album)) fail(404,'האירוע לא נמצא באלבום');
       const files=db.prepare('SELECT id FROM files WHERE moment_id=?').all(moment);
+      const requested=db.prepare("SELECT id FROM photo_requests WHERE moment_id=? AND status='pending'").all(moment);
       const target=b.targetId===undefined?null:text(b.targetId,80,'אירוע היעד');
       if(target) {
         if(target===moment)fail(400,'יש לבחור אירוע אחר');
@@ -221,7 +277,7 @@ const server = http.createServer(async (req,res) => {
         db.prepare('DELETE FROM moments WHERE id=? AND album_id=?').run(moment,b.album);
         db.exec('COMMIT');
       } catch(e) {db.exec('ROLLBACK');throw e;}
-      if(!target)for(const f of files) {try {unlinkSync(join(data,'uploads',f.id));} catch(e) {if(e.code!=='ENOENT')console.error('Deleted event file cleanup failed');}}
+      for(const f of [...requested,...(target?[]:files)]) {try {unlinkSync(join(data,'uploads',f.id));} catch(e) {if(e.code!=='ENOENT')console.error('Deleted event file cleanup failed');}}
       return send(res,200,{ok:true});
     }
     if (path === '/api/moments' && req.method === 'POST') {
@@ -273,4 +329,3 @@ if (process.env.BACKUP_ENABLED === '1') {
   backupDatabase();
   setInterval(backupDatabase,24*60*60*1000).unref();
 }
-

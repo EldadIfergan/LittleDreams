@@ -78,8 +78,15 @@ async function showAlbum() {
   $('#album-description').textContent = parent ? 'המקומות, הפעמים הראשונות, וכל מה שביניהם.' : 'כאן רואים את התמונות והסיפורים. אפשר לגלול למטה ולכתוב תגובה מתחת לכל אירוע.';
   $('#moments').replaceChildren(); $('#empty').hidden = true; $('#count').textContent = 'טוענים רגעים…';
   $('#checklist-items').replaceChildren();$('#checklist-count').textContent='';$('#checklist-error').textContent='';$('#checklist-status').textContent='';
-  const [moments,items] = await Promise.all([api('/api/moments?album='+album),parent?api('/api/checklist?album='+album):Promise.resolve([])]);
+  $('#photo-review').hidden=true;$('#photo-status').textContent='';
+  const [moments,items,requests,photos] = await Promise.all([api('/api/moments?album='+album),parent?api('/api/checklist?album='+album):Promise.resolve([]),api('/api/photo-requests?album='+album),import('/photo-requests.js')]);
   if(render!==albumRender || current?.id!==album)return;
+  const photoContext={api,onChange:showAlbum,preview:request=>{
+    $('#media-title').textContent=request.moment_title;
+    $('#media-content').replaceChildren(mediaGallery({title:request.moment_title,files:[{...request,previewUrl:'/api/photo-requests/files/'+request.id}]},true));
+    $('#media-dialog').showModal();
+  }};
+  photos.renderQueue(parent?requests:[],photoContext);
   renderChecklist(items,album,parent);
   let month='';
   $('#count').textContent = moments.length === 1 ? 'רגע אחד באלבום' : `${moments.length} רגעים באלבום`;
@@ -114,6 +121,7 @@ async function showAlbum() {
       const link=document.createElement('a');link.href=`/api/files/${file.id}`;link.download=file.name;link.textContent=`פתיחת המסמך: ${file.name}`;link.className='file-link';content.append(link);
     });
     content.append(commentSection(moment));
+    if(!parent)content.append(photos.requestControl(moment,requests,photoContext));
     card.append(content);const item=document.createElement('div');item.className='timeline-item';item.append(card);$('#moments').append(item);
   });
 }
@@ -137,7 +145,7 @@ function mediaGallery(moment,enlarged=false,start=0) {
   function render() {
     screen.querySelector('video')?.pause();
     const file=files[index],isVideo=file.type.startsWith('video/');
-    const media=document.createElement(isVideo?'video':'img');media.src=`/api/files/${file.id}`;
+    const media=document.createElement(isVideo?'video':'img');media.src=file.previewUrl || `/api/files/${file.id}`;
     if(isVideo){media.controls=true;media.preload='metadata';media.setAttribute('playsinline','');media.setAttribute('aria-label',`סרטון מהאירוע: ${moment.title}`);}
     else {media.alt=`${moment.title} — תמונה ${index+1}`;media.loading='lazy';}
     const error=document.createElement('p');error.className='error';error.hidden=true;error.setAttribute('role','alert');
@@ -157,7 +165,7 @@ let deletingMoment=null,deletePending=false;
 function openDelete(moment,moments,album) {
   deletingMoment={moment,album};
   const targets=moments.filter(m=>m.id!==moment.id),hasFiles=moment.files.length>0;
-  $('#delete-description').textContent=`למחוק את האירוע „${moment.title}”? הסיפור והתגובות יימחקו לצמיתות.`;
+  $('#delete-description').textContent=`למחוק את האירוע „${moment.title}”? הסיפור והתגובות יימחקו לצמיתות. גם בקשות לתמונות שטרם אושרו יימחקו ולא יועברו לאירוע אחר.`;
   $('#delete-choice-label').hidden=!hasFiles;
   $('#delete-choice').disabled=!hasFiles;
   $('#delete-choice').value=hasFiles?'':'delete';
