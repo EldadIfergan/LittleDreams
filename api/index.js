@@ -138,8 +138,8 @@ export default async function handler(req,res) {
       return await finish(200,checklist(await query("SELECT c.* FROM checklist c LEFT JOIN moments m ON m.id=c.moment_id WHERE c.album_id=$1 AND ($2 OR c.moment_id IS NULL OR m.visibility='family')",[album,access.role==='parent']),(await one('SELECT sex FROM albums WHERE id=$1',[album])).sex));
     }
     if(path==='/api/moments'&&!write) {
-      const album=url.searchParams.get('album');await member(user,album);
-      const moments=await query('SELECT * FROM moments WHERE album_id=$1 ORDER BY date ASC,created ASC,id ASC',[album]);
+      const album=url.searchParams.get('album');const access=await member(user,album);
+      const moments=await query("SELECT * FROM moments WHERE album_id=$1 AND ($2 OR visibility='family') ORDER BY date ASC,created ASC,id ASC",[album,access.role==='parent']);
       for(const m of moments) {m.created=Number(m.created);m.files=await query('SELECT id,name,type FROM files WHERE moment_id=$1',[m.id]);m.comments=(await query('SELECT c.id,c.body,c.created,u.name AS author,f.name AS family_name,f.relationship FROM comments c JOIN users u ON u.id=c.user_id LEFT JOIN family_profiles f ON f.user_id=c.user_id AND f.album_id=$2 WHERE moment_id=$1 ORDER BY c.created,c.id',[m.id,album])).map(({family_name,relationship,...c})=>({...c,author:familyAuthor(family_name||c.author,relationship),created:Number(c.created)}));}
       return await finish(200,moments);
     }
