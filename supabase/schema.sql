@@ -103,3 +103,7 @@ alter table little_dreams.photo_requests enable row level security;
 alter table little_dreams.photo_request_uploads enable row level security;
 revoke all on little_dreams.photo_requests,little_dreams.photo_request_uploads from public,anon,authenticated;
 commit;
+
+begin;
+alter table little_dreams.moments add column if not exists visibility text not null default 'family' check (visibility in ('family','parents'));
+commit;

@@ -18,7 +18,7 @@ pg.Pool.prototype.connect=async()=>({
     else if(sql.startsWith('SELECT user_id FROM sessions'))rows=signedIn?[{user_id:'guest'}]:[];
     else if(sql.startsWith('SELECT role FROM members'))rows=member?[{role:'viewer'}]:[];
     else if(sql.startsWith('SELECT password FROM users'))rows=[{password:null}];
-    else if(sql.startsWith('SELECT album_id FROM moments'))rows=[{album_id:'album'}];
+    else if(sql.startsWith('SELECT album_id,visibility FROM moments'))rows=[{album_id:'album',visibility:'family'}];
     else if(sql.startsWith('SELECT name,relationship FROM family_profiles'))rows=[{name:'לירז',relationship:'aunt'}];
     else if(sql.startsWith('SELECT * FROM moments'))rows=[{id:'moment',album_id:'album',created:'42'}];
     else if(sql.startsWith('SELECT c.id'))rows=[{id:'comment',body:'hello',author:'Original name',family_name:'לירז',relationship:'aunt',created:'43'}];

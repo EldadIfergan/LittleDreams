@@ -17,10 +17,10 @@ pg.Pool.prototype.connect = async () => ({
     if (sql.startsWith('SELECT to_regclass')) return {rows:[{requests:'photo_requests',uploads:'photo_request_uploads',family:'family_profiles'}]};
     if (sql.startsWith('SELECT user_id FROM sessions')) return {rows:signedIn ? [{user_id:'user'}] : []};
     if (sql.startsWith('SELECT role FROM members')) return {rows:role ? [{role}] : []};
-    if (sql.startsWith('SELECT album_id FROM moments')) return {rows:[{album_id:'album'}]};
-    if (sql.startsWith('SELECT id,album_id FROM moments')) return {rows:momentExists ? [{id:'moment',album_id:'album'}] : []};
+    if (sql.startsWith('SELECT album_id,visibility FROM moments')) return {rows:[{album_id:'album',visibility:'family'}]};
+    if (sql.startsWith('SELECT id,album_id,visibility FROM moments')) return {rows:momentExists ? [{id:'moment',album_id:'album',visibility:'family'}] : []};
     if (sql.startsWith('SELECT moment_id FROM photo_requests')) return {rows:[{moment_id:'moment'}]};
-    if (sql.startsWith('SELECT r.*,m.album_id FROM photo_requests')) return {rows:[{id:'photo',album_id:'album',user_id:'sender',status:'pending'}]};
+    if (sql.startsWith('SELECT r.*,m.album_id,m.visibility FROM photo_requests')) return {rows:[{id:'photo',album_id:'album',visibility:'family',user_id:'sender',status:'pending'}]};
     if (sql.startsWith('SELECT id FROM moments')) return {rows:momentExists ? [{id:'moment'}] : []};
     if (sql.startsWith('SELECT name FROM users')) return {rows:[{name:'Family'}]};
     return {rows:[]};

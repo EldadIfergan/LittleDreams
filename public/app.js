@@ -188,6 +188,7 @@ async function showAlbum() {
     const meta=document.createElement('div');meta.className='event-meta';
     const number=document.createElement('span');number.className='event-number';number.textContent=`אירוע ${index+1} מתוך ${moments.length}`;
     meta.append(number,date);heading.append(meta,title);
+    if(parent) {const badge=document.createElement('span');badge.className='visibility-badge';badge.textContent=moment.visibility==='parents'?'להורים בלבד':'גלוי למשפחה';heading.append(badge);}
     if (parent) {
       const edit=document.createElement('button');edit.type='button';edit.className='edit-event';
       edit.setAttribute('aria-label',`עריכת האירוע: ${moment.title}`);edit.title='עריכת אירוע';
@@ -375,7 +376,7 @@ function openMoment(moment=null,milestone=null) {
   $('#moment-form').reset(); $('#file-selection-status').textContent=''; $('#moment-error').textContent='';$('#upload-progress').textContent='';
   $('#moment-title').textContent=editingMoment?'עריכת האירוע':'רגע קטן, זיכרון גדול';
   const now=new Date();now.setMinutes(now.getMinutes()-now.getTimezoneOffset());
-  const form=$('#moment-form');form.elements.date.value=editingMoment?.date || now.toISOString().slice(0,10);
+  const form=$('#moment-form');form.elements.visibility.value=editingMoment?.visibility||'family';form.elements.date.value=editingMoment?.date || now.toISOString().slice(0,10);
   form.elements.title.value=editingMoment?.title || milestone?.title || '';form.elements.description.value=editingMoment?.description || '';
   renderFileList();$('#moment-dialog').showModal();
 }
@@ -417,7 +418,7 @@ $('#moment-form').onsubmit=async event=>{
   const element=event.target,form=new FormData(element),album=current.id,moment=editingMoment,milestone=selectedMilestone;
   const kept=(moment?.files || []).filter(f=>!removedFiles.has(f.id)).map(f=>f.id);
   const controller=new AbortController();uploadController=controller;
-  const controls=[...element.querySelectorAll('input,textarea,button')];controls.forEach(c=>c.disabled=true);
+  const controls=[...element.querySelectorAll('input,textarea,select,button')];controls.forEach(c=>c.disabled=true);
   $('#cancel-upload').hidden=false;$('#cancel-upload').disabled=false;$('#moment-error').textContent='';
   const progress=message=>$('#upload-progress').textContent=message;
   try {
@@ -448,7 +449,7 @@ $('#moment-form').onsubmit=async event=>{
     }
     if(controller.signal.aborted)throw new DOMException('הפעולה בוטלה','AbortError');
     progress('שומרים את האירוע…');$('#cancel-upload').disabled=true;
-    await api('/api/moments',{album,title:form.get('title'),date:form.get('date'),description:form.get('description'),files:attachments,...(milestone?{milestoneKey:milestone.key}:{}),...(moment?{id:moment.id,keepFiles:kept,original:{title:moment.title,date:moment.date,description:moment.description,files:moment.files.map(f=>f.id)}}:{})});
+    await api('/api/moments',{album,visibility:form.get('visibility'),title:form.get('title'),date:form.get('date'),description:form.get('description'),files:attachments,...(milestone?{milestoneKey:milestone.key}:{}),...(moment?{id:moment.id,keepFiles:kept,original:{visibility:moment.visibility||'family',title:moment.title,date:moment.date,description:moment.description,files:moment.files.map(f=>f.id)}}:{})});
     files.forEach(file=>uploadedFiles.delete(file));$('#moment-dialog').close();await showAlbum();
   } catch(error) {$('#moment-error').textContent=error.name==='AbortError'?'הפעולה בוטלה. האירוע לא השתנה ואפשר לנסות שוב.':error.message;}
   finally {uploadController=null;controls.forEach(c=>c.disabled=false);$('#cancel-upload').hidden=true;progress('');}

@@ -1,3 +1,4 @@
+import { visibility, canView } from './lib/visibility.js';
 import { checklist, milestoneKey } from './lib/checklist.js';
 import { planEdit } from './lib/event-edit.js';
 import { photoDetails, requestFiles, reviewDecision, approvalCapacity } from './lib/photo-requests.js';
@@ -74,6 +75,7 @@ async function body(req) {
 function send(res, status, value, headers = {}) {
   res.writeHead(status, { 'Content-Type':'application/json; charset=utf-8', ...headers }); res.end(JSON.stringify(value));
 }
+if(!db.prepare('PRAGMA table_info(moments)').all().some(c=>c.name==='visibility')) db.exec("ALTER TABLE moments ADD COLUMN visibility TEXT NOT NULL DEFAULT 'family' CHECK(visibility IN ('family','parents'))");
 function membership(user, album) {
   const member = db.prepare('SELECT * FROM members WHERE user_id=? AND album_id=?').get(user,album);
   if (!member) fail(403,'אין גישה לאלבום הזה'); return member;
@@ -194,9 +196,9 @@ const server = http.createServer(async (req,res) => {
     if (path === '/api/comments' && req.method === 'POST') {
       const b = await body(req);
       const momentId = text(b.moment,80,'הרגע');
-      const moment = db.prepare('SELECT album_id FROM moments WHERE id=?').get(momentId);
+      const moment = db.prepare('SELECT album_id,visibility FROM moments WHERE id=?').get(momentId);
       if (!moment) fail(404,'הרגע לא נמצא');
-      membership(user,moment.album_id);
+      if(!canView(membership(user,moment.album_id).role,moment))fail(404,'הרגע לא נמצא');
       const comment = {id:id(),body:text(b.body,2000,'התגובה (עד 2,000 תווים)'),created:Date.now()};
       db.prepare('INSERT INTO comments VALUES(?,?,?,?,?)').run(comment.id,momentId,user,comment.body,comment.created);
       comment.author = db.prepare('SELECT name FROM users WHERE id=?').get(user).name;
@@ -229,11 +231,11 @@ const server = http.createServer(async (req,res) => {
         editor(user,album);milestoneKey(b.key);if(typeof b.completed!=='boolean') fail(400,'סימון לא תקין');
         db.prepare('INSERT INTO checklist(album_id,key,completed) VALUES(?,?,?) ON CONFLICT(album_id,key) DO UPDATE SET completed=excluded.completed').run(album,b.key,Number(b.completed));
       } else membership(user,album);
-      return send(res,200,checklist(db.prepare('SELECT * FROM checklist WHERE album_id=?').all(album),db.prepare('SELECT sex FROM albums WHERE id=?').get(album).sex));
+      return send(res,200,checklist(db.prepare("SELECT c.* FROM checklist c LEFT JOIN moments m ON m.id=c.moment_id WHERE c.album_id=? AND (? OR c.moment_id IS NULL OR m.visibility='family')").all(album,Number(membership(user,album).role==='parent')),db.prepare('SELECT sex FROM albums WHERE id=?').get(album).sex));
     }
     if (path === '/api/moments' && req.method === 'GET') {
       const album = url.searchParams.get('album'); membership(user,album);
-      const moments = db.prepare('SELECT * FROM moments WHERE album_id=? ORDER BY date ASC,created ASC,id ASC').all(album);
+      const moments = db.prepare("SELECT * FROM moments WHERE album_id=? AND (? OR visibility='family') ORDER BY date ASC,created ASC,id ASC").all(album,Number(membership(user,album).role==='parent'));
       for (const moment of moments) {
         moment.files = db.prepare('SELECT id,name,type FROM files WHERE moment_id=?').all(moment.id);
         moment.comments = db.prepare('SELECT c.id,c.body,c.created,u.name AS author,f.name AS family_name,f.relationship FROM comments c JOIN users u ON u.id=c.user_id LEFT JOIN family_profiles f ON f.user_id=c.user_id AND f.album_id=? WHERE c.moment_id=? ORDER BY c.created,c.rowid').all(album,moment.id).map(({family_name,relationship,...comment})=>({...comment,author:familyAuthor(family_name||comment.author,relationship)}));
@@ -242,13 +244,13 @@ const server = http.createServer(async (req,res) => {
     }
     if(path==='/api/photo-requests' && req.method==='GET') {
       const album=url.searchParams.get('album'),member=membership(user,album);
-      const sql=`SELECT r.*,u.name AS author,m.title AS moment_title FROM photo_requests r JOIN moments m ON m.id=r.moment_id JOIN users u ON u.id=r.user_id WHERE m.album_id=? AND ${member.role==='parent'?"r.status='pending'":'r.user_id=?'} ORDER BY r.created,r.id`;
+      const sql=`SELECT r.*,u.name AS author,m.title AS moment_title FROM photo_requests r JOIN moments m ON m.id=r.moment_id JOIN users u ON u.id=r.user_id WHERE m.album_id=? AND ${member.role==='parent'?"r.status='pending'":"r.user_id=? AND m.visibility='family'"} ORDER BY r.created,r.id`;
       return send(res,200,db.prepare(sql).all(...(member.role==='parent'?[album]:[album,user])));
     }
     if(path==='/api/photo-requests' && req.method==='POST') {
       const b=await body(req);requestFiles(b.files);
-      const moment=db.prepare('SELECT id,album_id FROM moments WHERE id=?').get(text(b.moment,80,'מזהה הרגע'));
-      if(!moment)fail(404,'הרגע לא נמצא');membership(user,moment.album_id);
+      const moment=db.prepare('SELECT id,album_id,visibility FROM moments WHERE id=?').get(text(b.moment,80,'מזהה הרגע'));
+      if(!moment)fail(404,'הרגע לא נמצא');if(!canView(membership(user,moment.album_id).role,moment))fail(404,'הרגע לא נמצא');
       const count=db.prepare("SELECT count(*) AS n FROM photo_requests WHERE moment_id=? AND user_id=? AND status='pending'").get(moment.id,user).n;
       if(count+b.files.length>10)fail(400,'אפשר לשלוח עד 10 תמונות שממתינות לאישור לכל רגע');
       const files=b.files.map(f=>{
@@ -267,7 +269,7 @@ const server = http.createServer(async (req,res) => {
     }
     if(path==='/api/photo-requests/review' && req.method==='POST') {
       const b=await body(req);reviewDecision(b.decision);
-      const request=db.prepare('SELECT r.*,m.album_id FROM photo_requests r JOIN moments m ON m.id=r.moment_id WHERE r.id=?').get(text(b.id,80,'מזהה הבקשה'));
+      const request=db.prepare('SELECT r.*,m.album_id,m.visibility FROM photo_requests r JOIN moments m ON m.id=r.moment_id WHERE r.id=?').get(text(b.id,80,'מזהה הבקשה'));
       if(!request)fail(404,'הבקשה לא נמצאה');editor(user,request.album_id);
       if(request.status===b.decision)return send(res,200,{ok:true});
       if(request.status!=='pending')fail(409,'הבקשה כבר טופלה. רעננו את האלבום');
@@ -286,8 +288,9 @@ const server = http.createServer(async (req,res) => {
       return send(res,200,{ok:true});
     }
     if(path.startsWith('/api/photo-requests/files/') && req.method==='GET') {
-      const request=db.prepare("SELECT r.*,m.album_id FROM photo_requests r JOIN moments m ON m.id=r.moment_id WHERE r.id=? AND r.status='pending'").get(path.split('/').pop());
+      const request=db.prepare("SELECT r.*,m.album_id,m.visibility FROM photo_requests r JOIN moments m ON m.id=r.moment_id WHERE r.id=? AND r.status='pending'").get(path.split('/').pop());
       if(!request)fail(404,'התמונה לא נמצאה');const member=membership(user,request.album_id);
+      if(!canView(member.role,request))fail(404,'התמונה לא נמצאה');
       if(member.role!=='parent' && request.user_id!==user)fail(403,'אין הרשאה לצפות בתמונה הזאת');
       const file=join(data,'uploads',request.id);if(!existsSync(file))fail(404,'התמונה לא נמצאה');
       res.setHeader('Content-Type',request.type);return res.end(readFileSync(file));
@@ -330,6 +333,8 @@ const server = http.createServer(async (req,res) => {
         milestoneKey(b.milestoneKey);if(b.id) fail(400,'אפשר לקשר אבן דרך רק לאירוע חדש');
         if(db.prepare('SELECT moment_id FROM checklist WHERE album_id=? AND key=?').get(b.album,b.milestoneKey)?.moment_id) fail(409,'לאבן הדרך כבר יש אירוע. רעננו את האלבום כדי לצפות בו');
       }
+      const existing=b.id?db.prepare('SELECT * FROM moments WHERE id=?').get(moment):null;
+      const eventVisibility=visibility(b.visibility,existing?.visibility);
       const edit=b.id ? planEdit(b,db.prepare('SELECT * FROM moments WHERE id=?').get(moment),db.prepare('SELECT id,name,type FROM files WHERE moment_id=?').all(moment)) : null;
       if(edit) {if(edit.kept.length+b.files.length>10)fail(400,'אפשר לשמור עד 10 קבצים באירוע');total=edit.kept.reduce((sum,f)=>sum+statSync(join(data,'uploads',f.id)).size,0);}
       const files = b.files.map(f => {
@@ -341,9 +346,9 @@ const server = http.createServer(async (req,res) => {
       db.exec('BEGIN');
       try {
         if(edit) {
-          db.prepare('UPDATE moments SET title=?,date=?,description=? WHERE id=?').run(title,b.date,b.description.trim(),moment);
+          db.prepare('UPDATE moments SET title=?,date=?,description=?,visibility=? WHERE id=?').run(title,b.date,b.description.trim(),eventVisibility,moment);
           for(const f of edit.removed) db.prepare('DELETE FROM files WHERE id=? AND moment_id=?').run(f.id,moment);
-        } else db.prepare('INSERT INTO moments VALUES(?,?,?,?,?,?)').run(moment,b.album,title,b.date,b.description.trim(),Date.now());
+        } else db.prepare('INSERT INTO moments(id,album_id,title,date,description,created,visibility) VALUES(?,?,?,?,?,?,?)').run(moment,b.album,title,b.date,b.description.trim(),Date.now(),eventVisibility);
         if(b.milestoneKey!==undefined) db.prepare('INSERT INTO checklist(album_id,key,completed,moment_id) VALUES(?,?,1,?) ON CONFLICT(album_id,key) DO UPDATE SET completed=1,moment_id=excluded.moment_id').run(b.album,b.milestoneKey,moment);
         for (const f of files) { writeFileSync(join(data,'uploads',f.id),f.bytes); db.prepare('INSERT INTO files VALUES(?,?,?,?)').run(f.id,moment,f.name,f.type); }
         db.exec('COMMIT');
@@ -352,8 +357,8 @@ const server = http.createServer(async (req,res) => {
       return send(res,edit?200:201,{id:moment});
     }
     if (path.startsWith('/api/files/') && req.method === 'GET') {
-      const f = db.prepare('SELECT f.*,m.album_id FROM files f JOIN moments m ON m.id=f.moment_id WHERE f.id=?').get(path.split('/').pop());
-      if (!f) fail(404,'הקובץ לא נמצא'); membership(user,f.album_id);
+      const f = db.prepare('SELECT f.*,m.album_id,m.visibility FROM files f JOIN moments m ON m.id=f.moment_id WHERE f.id=?').get(path.split('/').pop());
+      if (!f) fail(404,'הקובץ לא נמצא'); if(!canView(membership(user,f.album_id).role,f))fail(404,'הקובץ לא נמצא');
       const file = join(data,'uploads',f.id); if (!existsSync(file)) fail(404,'הקובץ לא נמצא');
       res.setHeader('Content-Type',f.type);
       res.setHeader('Content-Disposition',`${f.type === 'application/pdf' ? 'attachment' : 'inline'}; filename*=UTF-8''${encodeURIComponent(f.name)}`);

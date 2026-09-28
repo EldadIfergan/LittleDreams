@@ -1,3 +1,4 @@
+import { visibility, canView } from '../lib/visibility.js';
 import { checklist, milestoneKey } from '../lib/checklist.js';
 import { birthTime } from '../lib/birth-time.js';
 import pg from 'pg';
@@ -124,17 +125,17 @@ export default async function handler(req,res) {
       const token=id();await query('INSERT INTO invites(token,album_id,role,expires) VALUES($1,$2,$3,$4)',[hash(token),b.album,b.role,Date.now()+172800000]);return await finish(201,{token});
     }
     if(path==='/api/comments'&&write) {
-      const moment=await one('SELECT album_id FROM moments WHERE id=$1',[text(b.moment,80)]);if(!moment) fail(404,'הרגע לא נמצא');await member(user,moment.album_id);
+      const moment=await one('SELECT album_id,visibility FROM moments WHERE id=$1 FOR SHARE',[text(b.moment,80)]);if(!moment) fail(404,'הרגע לא נמצא');if(!canView((await member(user,moment.album_id)).role,moment))fail(404,'הרגע לא נמצא');
       const details=await one('SELECT name,relationship FROM family_profiles WHERE user_id=$1 AND album_id=$2',[user,moment.album_id]);
       const comment={id:id(),body:text(b.body,2000),created:Date.now(),author:familyAuthor(details?.name||(await one('SELECT name FROM users WHERE id=$1',[user])).name,details?.relationship)};await query('INSERT INTO comments VALUES($1,$2,$3,$4,$5)',[comment.id,b.moment,user,comment.body,comment.created]);return await finish(201,comment);
     }
     if(path==='/api/checklist') {
-      const album=write?b.album:url.searchParams.get('album');await member(user,album,write);
+      const album=write?b.album:url.searchParams.get('album');const access=await member(user,album,write);
       if(write) {
         milestoneKey(b.key);if(typeof b.completed!=='boolean') fail(400,'סימון לא תקין');
         await query('INSERT INTO checklist(album_id,key,completed) VALUES($1,$2,$3) ON CONFLICT(album_id,key) DO UPDATE SET completed=excluded.completed',[album,b.key,Number(b.completed)]);
       }
-      return await finish(200,checklist(await query('SELECT * FROM checklist WHERE album_id=$1',[album]),(await one('SELECT sex FROM albums WHERE id=$1',[album])).sex));
+      return await finish(200,checklist(await query("SELECT c.* FROM checklist c LEFT JOIN moments m ON m.id=c.moment_id WHERE c.album_id=$1 AND ($2 OR c.moment_id IS NULL OR m.visibility='family')",[album,access.role==='parent']),(await one('SELECT sex FROM albums WHERE id=$1',[album])).sex));
     }
     if(path==='/api/moments'&&!write) {
       const album=url.searchParams.get('album');await member(user,album);
@@ -144,12 +145,12 @@ export default async function handler(req,res) {
     }
     if(path==='/api/photo-requests'&&!write) {
       const album=url.searchParams.get('album'),m=await member(user,album);
-      const requests=await query(`SELECT r.*,u.name AS author,m.title AS moment_title FROM photo_requests r JOIN moments m ON m.id=r.moment_id JOIN users u ON u.id=r.user_id WHERE m.album_id=$1 AND ${m.role==='parent'?"r.status='pending'":'r.user_id=$2'} ORDER BY r.created,r.id`,m.role==='parent'?[album]:[album,user]);
+      const requests=await query(`SELECT r.*,u.name AS author,m.title AS moment_title FROM photo_requests r JOIN moments m ON m.id=r.moment_id JOIN users u ON u.id=r.user_id WHERE m.album_id=$1 AND ${m.role==='parent'?"r.status='pending'":"r.user_id=$2 AND m.visibility='family'"} ORDER BY r.created,r.id`,m.role==='parent'?[album]:[album,user]);
       return await finish(200,requests.map(r=>({...r,size:Number(r.size),created:Number(r.created)})));
     }
     if(path==='/api/photo-requests/uploads'&&write) {
-      const moment=await one('SELECT id,album_id FROM moments WHERE id=$1 FOR UPDATE',[text(b.moment,80)]);
-      if(!moment)fail(404,'הרגע לא נמצא');await member(user,moment.album_id);
+      const moment=await one('SELECT id,album_id,visibility FROM moments WHERE id=$1 FOR UPDATE',[text(b.moment,80)]);
+      if(!moment)fail(404,'הרגע לא נמצא');if(!canView((await member(user,moment.album_id)).role,moment))fail(404,'הרגע לא נמצא');
       const file=photoDetails(b);
       const count=await one("SELECT count(*) AS n FROM photo_requests WHERE moment_id=$1 AND user_id=$2 AND status='pending'",[moment.id,user]);
       if(Number(count.n)>=10)fail(400,'כבר שלחתם 10 תמונות לרגע הזה. המתינו לאישור ההורים');
@@ -163,8 +164,8 @@ export default async function handler(req,res) {
     if(path==='/api/photo-requests'&&write) {
       requestFiles(b.files);
       if(b.files.some(f=>typeof f.id!=='string') || new Set(b.files.map(f=>f.id)).size!==b.files.length)fail(400,'רשימת התמונות אינה תקינה');
-      const moment=await one('SELECT id,album_id FROM moments WHERE id=$1 FOR UPDATE',[text(b.moment,80)]);
-      if(!moment)fail(404,'הרגע לא נמצא');await member(user,moment.album_id);
+      const moment=await one('SELECT id,album_id,visibility FROM moments WHERE id=$1 FOR UPDATE',[text(b.moment,80)]);
+      if(!moment)fail(404,'הרגע לא נמצא');if(!canView((await member(user,moment.album_id)).role,moment))fail(404,'הרגע לא נמצא');
       const existing=await query('SELECT id FROM photo_requests WHERE moment_id=$1 AND user_id=$2 AND id=ANY($3::text[])',[moment.id,user,b.files.map(f=>f.id)]);
       if(existing.length===b.files.length)return await finish(200,{ok:true});
       const count=await one("SELECT count(*) AS n FROM photo_requests WHERE moment_id=$1 AND user_id=$2 AND status='pending'",[moment.id,user]);
@@ -183,7 +184,7 @@ export default async function handler(req,res) {
       reviewDecision(b.decision);
       const found=await one('SELECT moment_id FROM photo_requests WHERE id=$1',[text(b.id,80)]);if(!found)fail(404,'הבקשה לא נמצאה');
       // Use the event lock first, matching edits, deletion and request submission.
-      const moment=await one('SELECT id,album_id FROM moments WHERE id=$1 FOR UPDATE',[found.moment_id]);
+      const moment=await one('SELECT id,album_id,visibility FROM moments WHERE id=$1 FOR UPDATE',[found.moment_id]);
       if(!moment)fail(404,'הרגע לא נמצא');await member(user,moment.album_id,true);
       const request=await one('SELECT * FROM photo_requests WHERE id=$1 FOR UPDATE',[b.id]);
       if(!request)fail(404,'הבקשה לא נמצאה');
@@ -202,8 +203,9 @@ export default async function handler(req,res) {
       return send(200,{ok:true});
     }
     if(path.startsWith('/api/photo-requests/files/')&&!write) {
-      const request=await one("SELECT r.*,m.album_id FROM photo_requests r JOIN moments m ON m.id=r.moment_id WHERE r.id=$1 AND r.status='pending'",[path.split('/').pop()]);
+      const request=await one("SELECT r.*,m.album_id,m.visibility FROM photo_requests r JOIN moments m ON m.id=r.moment_id WHERE r.id=$1 AND r.status='pending'",[path.split('/').pop()]);
       if(!request)fail(404,'התמונה לא נמצאה');const m=await member(user,request.album_id);
+      if(!canView(m.role,request))fail(404,'התמונה לא נמצאה');
       if(m.role!=='parent' && request.user_id!==user)fail(403,'אין הרשאה לצפות בתמונה הזאת');
       const result=await storage.createSignedUrl(request.id,300);if(result.error)throw result.error;
       await client.query('COMMIT');res.statusCode=302;res.setHeader('Location',result.data.signedUrl);res.end();return;
@@ -256,11 +258,11 @@ export default async function handler(req,res) {
         const item=await one('SELECT * FROM checklist WHERE album_id=$1 AND key=$2 FOR UPDATE',[b.album,b.milestoneKey]);
         if(item.moment_id) fail(409,'לאבן הדרך כבר יש אירוע. רעננו את האלבום כדי לצפות בו');
       }
-      let edit;
+      let edit,eventVisibility=visibility(b.visibility);
       if (b.id) {
         const existing=await one('SELECT * FROM moments WHERE id=$1 FOR UPDATE',[moment]);
         const existingFiles=await query('SELECT id,name,type FROM files WHERE moment_id=$1',[moment]);
-        edit=planEdit(b,existing,existingFiles);
+        edit=planEdit(b,existing,existingFiles);eventVisibility=visibility(b.visibility,existing.visibility);
         if(edit.kept.length+b.files.length>10) fail(400,'אפשר לשמור עד 10 קבצים באירוע');
         const sizes=await Promise.all(edit.kept.map(async f=>{const result=await storage.info(f.id);if(result.error) throw result.error;return Number(result.data.size);}));
         total=sizes.reduce((sum,size)=>sum+size,0);
@@ -273,9 +275,9 @@ export default async function handler(req,res) {
         total+=Number(pending.size);if(total>104857600) fail(400,'אפשר לצרף עד 100MB לרגע');files.push(pending);
       }
       if(edit) {
-        await query('UPDATE moments SET title=$1,date=$2,description=$3 WHERE id=$4',[title,b.date,b.description.trim(),moment]);
+        await query('UPDATE moments SET title=$1,date=$2,description=$3,visibility=$5 WHERE id=$4',[title,b.date,b.description.trim(),moment,eventVisibility]);
         for(const f of edit.removed) await query('DELETE FROM files WHERE id=$1 AND moment_id=$2',[f.id,moment]);
-      } else await query('INSERT INTO moments VALUES($1,$2,$3,$4,$5,$6)',[moment,b.album,title,b.date,b.description.trim(),Date.now()]);
+      } else await query('INSERT INTO moments(id,album_id,title,date,description,created,visibility) VALUES($1,$2,$3,$4,$5,$6,$7)',[moment,b.album,title,b.date,b.description.trim(),Date.now(),eventVisibility]);
       if(b.milestoneKey!==undefined) await query('UPDATE checklist SET completed=1,moment_id=$1 WHERE album_id=$2 AND key=$3',[moment,b.album,b.milestoneKey]);
       for(const f of files){await query('INSERT INTO files VALUES($1,$2,$3,$4)',[f.id,moment,f.name,f.type]);await query('DELETE FROM pending_uploads WHERE id=$1',[f.id]);}
       await client.query('COMMIT');
@@ -284,7 +286,7 @@ export default async function handler(req,res) {
       return send(edit?200:201,{id:moment});
     }
     if(path.startsWith('/api/files/')&&!write) {
-      const f=await one('SELECT f.*,m.album_id FROM files f JOIN moments m ON m.id=f.moment_id WHERE f.id=$1',[path.split('/').pop()]);if(!f) fail(404,'הקובץ לא נמצא');await member(user,f.album_id);
+      const f=await one('SELECT f.*,m.album_id,m.visibility FROM files f JOIN moments m ON m.id=f.moment_id WHERE f.id=$1',[path.split('/').pop()]);if(!f) fail(404,'הקובץ לא נמצא');if(!canView((await member(user,f.album_id)).role,f))fail(404,'הקובץ לא נמצא');
       const result=await storage.createSignedUrl(f.id,300,f.type==='application/pdf'?{download:f.name}:{});if(result.error) throw result.error;
       await client.query('COMMIT');res.statusCode=302;res.setHeader('Location',result.data.signedUrl);res.end();return;
     }
