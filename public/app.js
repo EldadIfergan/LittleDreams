@@ -211,7 +211,6 @@ async function showAlbum() {
     content.append(commentSection(moment));
     if(!parent)content.append(photos.requestControl(moment,requests,photoContext));
     const end=document.createElement('div');end.className='event-end';
-    const endLabel=document.createElement('span');endLabel.textContent='סוף האירוע';end.append(endLabel);
     if(index<moments.length-1){const next=document.createElement('a');next.className='next-event';next.href='#moment-'+moments[index+1].id;next.textContent='לאירוע הבא: '+moments[index+1].title+' ↓';end.append(next);}
     else {const last=document.createElement('span');last.textContent='זה האירוע האחרון באלבום';end.append(last);}
     card.append(heading,content,end);const item=document.createElement('div');item.className='timeline-item';item.append(card);$('#moments').append(item);
@@ -230,6 +229,13 @@ function mediaGallery(moment,enlarged=false,start=0) {
   controls.append(previous,position,next);controls.hidden=files.length===1;
   const open=document.createElement('button');open.type='button';open.className='secondary enlarge-media';open.hidden=enlarged;
   const download=document.createElement('a');download.className='file-link gallery-download';
+  function actionIcon(path) {
+    const svg=document.createElementNS('http://www.w3.org/2000/svg','svg');
+    for(const [key,value] of Object.entries({viewBox:'0 0 24 24',fill:'none',stroke:'currentColor','stroke-width':'1.8','stroke-linecap':'round','stroke-linejoin':'round','aria-hidden':'true'}))svg.setAttribute(key,value);
+    const shape=document.createElementNS(svg.namespaceURI,'path');shape.setAttribute('d',path);svg.append(shape);return svg;
+  }
+  open.append(actionIcon('M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5'));
+  download.append(actionIcon('M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5'));
   open.onclick=()=>{
     screen.querySelector('video')?.pause();
     $('#media-title').textContent=moment.title;$('#media-content').replaceChildren(mediaGallery(moment,true,index));$('#media-dialog').showModal();
@@ -242,16 +248,16 @@ function mediaGallery(moment,enlarged=false,start=0) {
     else {media.alt=`${moment.title} — תמונה ${index+1}`;media.loading='lazy';}
     const error=document.createElement('p');error.className='error';error.hidden=true;error.setAttribute('role','alert');
     media.onerror=()=>{error.textContent='לא הצלחנו להציג את הקובץ. אפשר לנסות לרענן את הדף.';error.hidden=false;};
-    screen.replaceChildren(media,error);
+    screen.replaceChildren(media,actions,error);
     position.textContent=`${isVideo?'סרטון':'תמונה'} ${index+1} מתוך ${files.length}`;
     previous.disabled=index===0;next.disabled=index===files.length-1;
-    open.textContent=isVideo?'צפייה בסרטון בחלון גדול':'הגדלת התמונה';
-    download.href=media.src;download.download=file.name;download.textContent=isVideo?'שמירת הסרטון':'שמירת התמונה';
+    open.title=isVideo?'צפייה בסרטון בחלון גדול':'הגדלת התמונה';open.setAttribute('aria-label',open.title);
+    download.href=media.src;download.download=file.name;download.title=isVideo?'שמירת הסרטון':'שמירת התמונה';download.setAttribute('aria-label',download.title);
   }
   previous.onclick=()=>{if(index>0){index--;render();}};
   next.onclick=()=>{if(index<files.length-1){index++;render();}};
   const actions=document.createElement('div');actions.className='gallery-actions';actions.append(open,download);
-  gallery.append(screen,controls,actions);render();return gallery;
+  gallery.append(screen,controls);render();return gallery;
 }
 $('#media-dialog').addEventListener('close',()=>{$('#media-content').querySelectorAll('video').forEach(video=>video.pause());$('#media-content').replaceChildren();});
 let deletingMoment=null,deletePending=false;
