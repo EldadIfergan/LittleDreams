@@ -92,7 +92,7 @@ function accept(user, token) {
   if(invite.role==='parent'&&!db.prepare('SELECT password FROM users WHERE id=?').get(user)?.password)fail(403,'להצטרפות כהורה יש להיכנס לחשבון הורה עם דוא״ל וסיסמה.');
   if (db.prepare('SELECT 1 FROM members WHERE user_id=? AND album_id=?').get(user,invite.album_id)) fail(400,'כבר יש לך גישה לאלבום');
   db.prepare('INSERT INTO members VALUES(?,?,?)').run(user,invite.album_id,invite.role);
-  db.prepare('UPDATE invites SET used=1 WHERE token=?').run(invite.token);
+  if(invite.role==='parent')db.prepare('UPDATE invites SET used=1 WHERE token=?').run(invite.token);
 }
 const server = http.createServer(async (req,res) => {
   res.setHeader('X-Content-Type-Options','nosniff');
@@ -139,7 +139,7 @@ const server = http.createServer(async (req,res) => {
         if(!signedIn)db.prepare('INSERT INTO users(id,email,name,password) VALUES(?,NULL,?,NULL)').run(user,details.name);
         db.prepare('INSERT INTO members(user_id,album_id,role) VALUES(?,?,?)').run(user,album,'viewer');
         db.prepare('INSERT INTO family_profiles(user_id,album_id,name,phone,relationship) VALUES(?,?,?,?,?)').run(user,album,details.name,details.phone,details.relationship);
-        db.prepare('UPDATE invites SET used=1 WHERE token=?').run(invitationHash);
+        // Family links remain reusable until their original expiry.
         maxAge=db.prepare('SELECT password FROM users WHERE id=?').get(user).password?604800:familySessionSeconds;
         newToken=id();db.prepare('INSERT INTO sessions VALUES(?,?,?)').run(hash(newToken),user,Date.now()+maxAge*1000);
         db.exec('COMMIT');

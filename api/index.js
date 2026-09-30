@@ -62,7 +62,7 @@ export default async function handler(req,res) {
       await query('SELECT id FROM albums WHERE id=$1 FOR UPDATE',[invite.album_id]);
       if(invite.role==='parent' && Number((await one("SELECT count(*) AS n FROM members WHERE album_id=$1 AND role='parent'",[invite.album_id])).n)>=2) fail(400,'לאלבום כבר משויכים שני הורים');
       if(await one('SELECT 1 FROM members WHERE user_id=$1 AND album_id=$2',[user,invite.album_id])) fail(400,'כבר יש לך גישה לאלבום');
-      await query('INSERT INTO members VALUES($1,$2,$3)',[user,invite.album_id,invite.role]);await query('UPDATE invites SET used=1 WHERE token=$1',[invite.token]);
+      await query('INSERT INTO members VALUES($1,$2,$3)',[user,invite.album_id,invite.role]);if(invite.role==='parent')await query('UPDATE invites SET used=1 WHERE token=$1',[invite.token]);
     }
     async function createAlbum(user,b) {
       if(!(await one('SELECT password FROM users WHERE id=$1',[user]))?.password) fail(403,'יצירת אלבום זמינה לחשבון הורה');
@@ -84,7 +84,7 @@ export default async function handler(req,res) {
       if(!signedIn)await query('INSERT INTO users(id,email,name,password) VALUES($1,NULL,$2,NULL)',[user,details.name]);
       await query("INSERT INTO members(user_id,album_id,role) VALUES($1,$2,'viewer') ON CONFLICT(user_id,album_id) DO NOTHING",[user,invitation.album_id]);
       await query('INSERT INTO family_profiles(user_id,album_id,name,phone,relationship) VALUES($1,$2,$3,$4,$5) ON CONFLICT(user_id,album_id) DO NOTHING',[user,invitation.album_id,details.name,details.phone,details.relationship]);
-      await query('UPDATE invites SET used=1 WHERE token=$1',[inviteHash]);
+      // Family links remain reusable until their original expiry.
       const maxAge=(await one('SELECT password FROM users WHERE id=$1',[user]))?.password?604800:familySessionSeconds;
       const token=id();await query('INSERT INTO sessions VALUES($1,$2,$3)',[hash(token),user,Date.now()+maxAge*1000]);
       await client.query('COMMIT');

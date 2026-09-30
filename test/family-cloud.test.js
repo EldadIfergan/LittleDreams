@@ -40,7 +40,7 @@ test('cloud invite lookup reveals only a valid invitation, or existing membershi
   signedIn=true;member=true;assert.deepEqual((await request('/api/invites/info?token='+details.invite)).body,{joined:true,album:'album'});
   assert.ok(!calls.some(c=>/^(INSERT|UPDATE|DELETE)/.test(c.sql)));
 });
-test('cloud family signup locks and consumes the invite, forces viewer, then commits before setting a cookie',async()=>{
+test('cloud family signup locks and preserves the reusable invite, forces viewer, then commits before setting a cookie',async()=>{
   reset();const result=await request('/api/family/join',{...details,role:'parent',album:'foreign'});
   assert.equal(result.status,200);assert.equal(result.body.album,'album');
   assert.ok(calls.some(c=>c.sql.endsWith('FOR UPDATE OF i')));
@@ -48,7 +48,7 @@ test('cloud family signup locks and consumes the invite, forces viewer, then com
   const membership=calls.find(c=>c.sql.startsWith('INSERT INTO members'));
   assert.match(membership.sql,/'viewer'/);assert.equal(membership.values[1],'album');
   assert.deepEqual(calls.find(c=>c.sql.startsWith('INSERT INTO family_profiles')).values.slice(1),['album','דורית','+972501234567','grandmother']);
-  assert.ok(calls.some(c=>c.sql==='UPDATE invites SET used=1 WHERE token=$1'));
+  assert.ok(!calls.some(c=>c.sql.startsWith('UPDATE invites')));
   assert.match(result.headers['Set-Cookie'],/HttpOnly; Secure; SameSite=Strict/);assert.match(result.headers['Set-Cookie'],/Max-Age=7776000/);
   assert.deepEqual(calls.slice(-2).map(c=>c.sql),['COMMIT','SET COOKIE']);
 });

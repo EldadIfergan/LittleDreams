@@ -35,8 +35,8 @@ test('three-field invitation signup grants only the invited album and labels com
   assert.match(guest.setCookie,/HttpOnly/);assert.match(guest.setCookie,/SameSite=Strict/);assert.match(guest.setCookie,/Max-Age=7776000/);
   const me=(await request('/api/me',undefined,guest.cookie)).body;
   assert.equal(me.user.email,null);assert.deepEqual(me.albums.map(a=>[a.id,a.role]),[[album,'viewer']]);
-  assert.equal((await request('/api/family/join',details)).status,410);
-  assert.equal((await request('/api/invites/info?token='+invite)).status,410);
+  assert.equal((await request('/api/family/join',{...details,name:'משפחה נוספת'})).status,200);
+  assert.equal((await request('/api/invites/info?token='+invite)).status,200);
   assert.equal((await request('/api/family/join',details,guest.cookie)).status,200,'same session retry is safe');
   assert.deepEqual((await request('/api/invites/info?token='+invite,undefined,guest.cookie)).body,{joined:true,album});
   const comment=await request('/api/comments',{moment:firstMoment,body:'איזה אושר!',author:'הורה'},guest.cookie);
@@ -59,7 +59,7 @@ test('three-field invitation signup grants only the invited album and labels com
   assert.equal((await request('/api/comments',{moment:firstMoment,body:'עדיין סבתא'},secondJoin.cookie)).body.author,'סבתא דורית');
   const raceInvite=await invitation();
   const race=await Promise.all([request('/api/family/join',{...details,invite:raceInvite}),request('/api/family/join',{...details,invite:raceInvite})]);
-  assert.deepEqual(race.map(r=>r.status).sort(),[200,410]);
+  assert.deepEqual(race.map(r=>r.status).sort(),[200,200]);
   const expired=await invitation(),db=new DatabaseSync(join(data,'album.sqlite'));
   try {
     db.prepare('UPDATE invites SET expires=0 WHERE token=?').run(createHash('sha256').update(expired).digest('hex'));
@@ -72,5 +72,5 @@ test('three-field invitation signup grants only the invited album and labels com
   assert.equal((await request('/api/me',undefined,secondJoin.cookie)).status,401);
   assert.equal((await request('/api/login',credentials)).status,200,'existing parent login still works');
   const additionalParent=await request('/api/register',{name:'Parent 2',email:'parent2@example.test',password:credentials.password,invite:parentInvite});
-  assert.equal(additionalParent.status,200);assert.equal((await request('/api/me',undefined,additionalParent.cookie)).body.albums[0].role,'parent');
+  assert.equal(additionalParent.status,200);assert.equal((await request('/api/invites/info?token='+parentInvite)).status,410);assert.equal((await request('/api/me',undefined,additionalParent.cookie)).body.albums[0].role,'parent');
 });

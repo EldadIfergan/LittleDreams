@@ -376,7 +376,7 @@ function openMoment(moment=null,milestone=null) {
   $('#moment-form').reset(); $('#file-selection-status').textContent=''; $('#moment-error').textContent='';$('#upload-progress').textContent='';
   $('#moment-title').textContent=editingMoment?'עריכת האירוע':'רגע קטן, זיכרון גדול';
   const now=new Date();now.setMinutes(now.getMinutes()-now.getTimezoneOffset());
-  const form=$('#moment-form');form.elements.visibility.value=editingMoment?.visibility||'family';form.elements.date.value=editingMoment?.date || now.toISOString().slice(0,10);
+  const form=$('#moment-form');form.elements.parentsOnly.checked=editingMoment?.visibility==='parents';form.elements.date.value=editingMoment?.date || now.toISOString().slice(0,10);
   form.elements.title.value=editingMoment?.title || milestone?.title || '';form.elements.description.value=editingMoment?.description || '';
   renderFileList();$('#moment-dialog').showModal();
 }
@@ -449,15 +449,16 @@ $('#moment-form').onsubmit=async event=>{
     }
     if(controller.signal.aborted)throw new DOMException('הפעולה בוטלה','AbortError');
     progress('שומרים את האירוע…');$('#cancel-upload').disabled=true;
-    await api('/api/moments',{album,visibility:form.get('visibility'),title:form.get('title'),date:form.get('date'),description:form.get('description'),files:attachments,...(milestone?{milestoneKey:milestone.key}:{}),...(moment?{id:moment.id,keepFiles:kept,original:{visibility:moment.visibility||'family',title:moment.title,date:moment.date,description:moment.description,files:moment.files.map(f=>f.id)}}:{})});
+    await api('/api/moments',{album,visibility:form.has('parentsOnly')?'parents':'family',title:form.get('title'),date:form.get('date'),description:form.get('description'),files:attachments,...(milestone?{milestoneKey:milestone.key}:{}),...(moment?{id:moment.id,keepFiles:kept,original:{visibility:moment.visibility||'family',title:moment.title,date:moment.date,description:moment.description,files:moment.files.map(f=>f.id)}}:{})});
     files.forEach(file=>uploadedFiles.delete(file));$('#moment-dialog').close();await showAlbum();
   } catch(error) {$('#moment-error').textContent=error.name==='AbortError'?'הפעולה בוטלה. האירוע לא השתנה ואפשר לנסות שוב.':error.message;}
   finally {uploadController=null;controls.forEach(c=>c.disabled=false);$('#cancel-upload').hidden=true;progress('');}
 };
-$('#invite-button').onclick = () => { $('#invite-result').hidden = true; $('#invite-error').textContent = ''; $('#invite-result small').textContent = ['localhost','127.0.0.1'].includes(location.hostname) ? 'בסביבה המקומית הקישור פועל רק במחשב הזה.' : 'אפשר לשלוח את הקישור באופן פרטי לאדם שהזמנתם.'; $('#invite-dialog').showModal(); };
+$('#invite-button').onclick = () => { $('#invite-result').hidden = true; $('#invite-error').textContent = ''; $('#invite-result small').textContent = ['localhost','127.0.0.1'].includes(location.hostname) ? 'בסביבה המקומית הקישור פועל רק במחשב הזה.' : 'קישור למשפחה ניתן לשיתוף עם כמה בני משפחה.'; $('#invite-dialog').showModal(); };
 $('#invite-form').onsubmit = event => {
   event.preventDefault(); busy(event.target,$('#invite-error'),async () => {
     const result = await api('/api/invites',{album:current.id,role:event.target.elements.role.value});
+    $('#invite-result small').textContent=event.target.elements.role.value==='viewer'?'אפשר לשלוח לכמה בני משפחה. הקישור פתוח להצטרפות במשך 48 שעות מרגע יצירתו.':'הקישור להורה נוסף הוא חד־פעמי ותקף ל־48 שעות.';
     $('#invite-link').value = `${location.origin}/?invite=${result.token}`; $('#invite-result').hidden = false; $('#invite-link').select();
   });
 };
